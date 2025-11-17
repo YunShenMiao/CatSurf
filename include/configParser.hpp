@@ -12,7 +12,7 @@
 
 struct GlobalConfig
 {
-    int worker_processes;
+    unsigned int worker_processes;
     std::string error_log;
     std::string pid;
 };
@@ -21,14 +21,18 @@ struct LocationConfig
 {
     std::string path;
     std::string root;
-    bool allow_upload;
+    bool autoindex;
+    std::vector<std::string> index_files;
+    std::vector<std::string> allowed_methods;
 };
 
 struct ServerConfig
 {
-    std::string server_name;
+    std::vector<std::string> server_name;
     int listen_port;
     std::string root;
+    std::vector<std::string> index_files;
+    std::map<int, std::string> error_pages;
     std::vector<LocationConfig> locations;
 };
 
@@ -50,7 +54,8 @@ enum Type
     BOOLEAN,
     STRING,
     LIST,
-    MAP
+    MAP,
+    BLOCK
 };
 
 enum Block
@@ -71,6 +76,7 @@ class ConfigParser
 
     GlobalConfig global_config;
     std::vector<ServerConfig> servers;
+    int server_amnt;
 
     void parseGlobalConfig(const std::vector<std::string>& tokens, size_t& i);
     void setDefaultGC();

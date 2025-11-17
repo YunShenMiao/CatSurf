@@ -26,7 +26,7 @@ const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
             {"index", LIST},
             {"server_name", LIST},
             {"error_page", MAP},
-            {"location", LIST} //block?
+            {"location", BLOCK}
         }
     },
     {LOCATION, 

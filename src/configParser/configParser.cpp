@@ -9,6 +9,7 @@ ConfigParser::ConfigParser() {}
 
 ConfigParser::~ConfigParser() {}
 
+//i dont call this.. 
 bool validateType(Type t, std::string value)
 {
     switch (t) 
@@ -31,37 +32,6 @@ bool validateType(Type t, std::string value)
             return false;
     }
 }
-
-/* void ConfigParser::parseServer(std::vector<std::string> tokens, size_t& i)
-{
-    i++;
-    if (tokens[i] != "{")
-        throw std::runtime_error("ConfigSyntaxError: expected: '{', got: '" + tokens[i] + "'");
-    i++;
-    while (i < tokens.size() && tokens[i] != "}")
-    
-
-} */
-
-/* for (size_t i = 0; i < tokens.size(); i++) {
-    std::string token = tokens[i];
-    
-    if (token == "server") {
-        // enter server block
-        current_block = SERVER;
-        expectToken("{");
-    }
-    else if (token == "}") {
-        // exit block
-    }
-    else if (grammar[current_block].find(token) != grammar[current_block].end()) {
-        // It's a valid directive! Parse it
-        parseDirective(token);
-    }
-    else {
-        throw std::runtime_error("Unknown token: " + token);
-    }
-} */
 
 std::vector<std::string> tokenizeFile(const std::string& path)
 {
@@ -104,18 +74,22 @@ void ConfigParser::parse(const std::string& path)
     parseGlobalConfig(tokens, i);
     std::cout << "Global Config vals: wp: " << global_config.worker_processes << " el: " << global_config.error_log << " pid: " << global_config.pid << std::endl;
 
-/*     while (i < tokens.size()) 
+    while (i < tokens.size()) 
     {
         if (tokens[i] == "server")
             parseServer(tokens, i);
-    } */
+        else
+            throw std::runtime_error("Unexpected token outside server block: " + tokens[i]);
+    }
+    if (servers.empty())
+        throw std::runtime_error("No server blocks found in config file");
 }
-
 
 const GlobalConfig& ConfigParser::getGlobalConfig() const
 {
     return global_config;
 }
+
 const std::vector<ServerConfig>& ConfigParser::getServers() const
 {
     return servers;
