@@ -7,8 +7,8 @@ void ConfigParser::setLocationDefaults(ServerConfig& serv)
     {
         if (serv.locations[i].root.empty())
             serv.locations[i].root = serv.root;
-        if (serv.locations[i].index_files.empty())
-            serv.locations[i].index_files = serv.index_files;
+        if (serv.locations[i].index.empty())
+            serv.locations[i].index = serv.index;
         if (serv.locations[i].allow_methods.empty())
             serv.locations[i].allow_methods = {"GET"};
     }
@@ -25,16 +25,26 @@ void ConfigParser::setLocDirective(const std::string& key, const std::string& va
         if (value == "on")
             loc.autoindex = 1;
     }
+    else if (key == "client_max_body_size")
+        loc.client_max_body_size = parseSize(value);
+    else if (key == "cgi_path")
+        loc.cgi_path = value;
+    else if (key == "upload_path")
+        loc.upload_path = value;
 }
 
 void ConfigParser::setLocDirective(const std::string& key, const std::vector<std::string>& value, Type t, LocationConfig& loc)
 {
     if (!validateType(t, value))
         throw std::runtime_error("Invalid value for directive: " + key);
-    if (key == "index_files")
-        loc.index_files = value;
+    if (key == "index")
+        loc.index = value;
     else if (key == "allow_methods")
         loc.allow_methods = value;
+    else if (key == "cgi_extension")
+        loc.cgi_extension = value;
+    else if (key == "return")
+        loc.return_ = value;
 }
 
 void ConfigParser::parseLocation(const std::vector<std::string>& tokens, size_t& i, ServerConfig& serv)
@@ -67,7 +77,7 @@ void ConfigParser::parseLocation(const std::vector<std::string>& tokens, size_t&
             Type t = grammar.at(LOCATION).at(key);
             i++;
 
-            if (t == FILENAME || t == METH)
+            if (t == FILENAME || t == METH || t == CGI_EXT || t == REDIRECT)
             {
                 std::vector<std::string> values;
                 while (i < tokens.size() && tokens[i] != ";")
@@ -84,7 +94,7 @@ void ConfigParser::parseLocation(const std::vector<std::string>& tokens, size_t&
             {
                 const std::string& value = tokens[i];
                 if (i + 1 >= tokens.size() || tokens[i + 1] != ";")
-                    throw std::runtime_error("Smmyntax error: Missing ';'");
+                    throw std::runtime_error("Syntax error: Missing ';'");
                 if (!validateType(t, value))
                     throw std::runtime_error("Invalid type for directive: " + key + " inside Location Block");
                 setLocDirective(key, value, t, loc);

@@ -15,10 +15,10 @@ void ConfigParser::setServerDefaults(ServerConfig &serv)
         serv.root = "/var/www/html";
     if (serv.server_name.empty())
         serv.server_name = {"_"};
-    if (serv.index_files.empty())
-        serv.index_files = {"index.html"};
-    if (serv.error_pages.empty())
-        serv.error_pages = {{404, "/404.html"}, {500, "/50x.html"}};
+    if (serv.index.empty())
+        serv.index = {"index.html"};
+    if (serv.error_page.empty())
+        serv.error_page = {{404, "/404.html"}, {500, "/50x.html"}};
 }
 
 void ConfigParser::setServerDirective(const std::string& key, const std::string& value, Type t, ServerConfig& serv)
@@ -29,6 +29,10 @@ void ConfigParser::setServerDirective(const std::string& key, const std::string&
         serv.listen_port = stoi(value);
     else if (key == "root")
         serv.root = value;
+    else if (key == "client_max_body_size")
+        serv.client_max_body_size = parseSize(value);
+    else if (key == "timeout")
+        serv.timeout = stoi(value);
 }
 
 void ConfigParser::setServerDirective(const std::string& key, const std::vector<std::string>& value, Type t, ServerConfig& serv)
@@ -36,16 +40,16 @@ void ConfigParser::setServerDirective(const std::string& key, const std::vector<
     if (!validateType(t, value))
         throw std::runtime_error("Invalid value for directive: " + key);
     if (key == "index")
-        serv.index_files = value;
+        serv.index = value;
     else if (key == "server_name")
         serv.server_name = value;
-    else if (key == "error_pages")
+    else if (key == "error_page")
     {
         const std::string& path = value.back();
         for (size_t i = 0; i < value.size() - 1; i++)
         {
             int code = std::stoi(value[i]);
-            serv.error_pages[code] = path;
+            serv.error_page[code] = path;
         }
     }
 }

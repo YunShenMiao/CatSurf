@@ -3,8 +3,7 @@
 #define BLUE  "\033[34m"
 #define RESET "\033[0m"
 
-
-void ConfigParser::test_print()
+/* void ConfigParser::test_print()
 {
     std::cout << BLUE << "Global Config vals:" << std::endl;
     std::cout << RESET << "wp: " << global_config.worker_processes << " el: " << global_config.error_log << " pid: " << global_config.pid << std::endl;
@@ -14,16 +13,17 @@ void ConfigParser::test_print()
     {
         std::cout << BLUE << "server" << i << ": " << RESET << std::endl;
         std::cout << "listen: " << servers[i].listen_port << " root: " << servers[i].root << std::endl;
-        std::cout << "index_files: ";
-        for (size_t j = 0; j < servers[i].index_files.size(); j++)
-            std::cout << servers[i].index_files[j] << ", ";
+        std::cout << "max_size: " << servers[i].client_max_body_size << std::endl;
+        std::cout << "index: ";
+        for (size_t j = 0; j < servers[i].index.size(); j++)
+            std::cout << servers[i].index[j] << ", ";
         std::cout << std::endl;
         std::cout << "server_name: ";
         for (size_t j = 0; j < servers[i].server_name.size(); j++)
             std::cout << servers[i].server_name[j] << ", ";
         std::cout << std::endl;
-        std::cout << "error_pages: ";
-        for (auto it = servers[i].error_pages.begin(); it != servers[i].error_pages.end(); it++)
+        std::cout << "error_page: ";
+        for (auto it = servers[i].error_page.begin(); it != servers[i].error_page.end(); it++)
             std::cout << it->first << " - " << it->second << ", ";
         std::cout << std::endl;
         std::cout << RED << "------------------------------------------------" << std::endl;
@@ -32,10 +32,16 @@ void ConfigParser::test_print()
     std::cout << BLUE << "Location vals:" << std::endl;
     std::cout << "location" << k << std::endl;
     std::cout << RESET << "path: " << servers[i].locations[k].path << ", root: " << servers[i].locations[k].root << std::endl;
-    std::cout << "autoindex: " << servers[i].locations[k].autoindex << std::endl;
+    std::cout << "autoindex: " << servers[i].locations[k].autoindex << ", max_size: " << servers[i].locations[k].client_max_body_size << std::endl;
+    std::cout << "cgi_path: " << servers[i].locations[k].cgi_path << std::endl;
+    std::cout << "upload_path: " << servers[i].locations[k].upload_path << std::endl;
     std::cout << "index files:";
-    for (size_t j = 0; j < servers[i].locations[k].index_files.size(); j++)
-        std::cout << servers[i].locations[k].index_files[j] << ", ";
+    for (size_t j = 0; j < servers[i].locations[k].index.size(); j++)
+        std::cout << servers[i].locations[k].index[j] << ", ";
+        std::cout << std::endl;
+    std::cout << "cgi extension:";
+    for (size_t j = 0; j < servers[i].locations[k].cgi_extension.size(); j++)
+        std::cout << servers[i].locations[k].cgi_extension[j] << ", ";
         std::cout << std::endl;
     std::cout << "allowed methods: ";
     for (size_t j = 0; j < servers[i].locations[k].allow_methods.size(); j++)
@@ -45,7 +51,7 @@ void ConfigParser::test_print()
     }
 }
 
-}
+} */
 
 int main(int argc, char *argv[])
 {

@@ -19,7 +19,6 @@ bool validateType(Type t, const std::vector<std::string>& value)
         case METH:
             for (size_t i = 0; i < value.size(); i++)
             {
-                /* std::cout << value[i] << std::endl; */
                 std::cout << isMethod(value[i]) << std::endl;
                 if (!isMethod(value[i]))
                     return false;
@@ -39,6 +38,15 @@ bool validateType(Type t, const std::vector<std::string>& value)
                     return false;
             }
                 return true;
+        case CGI_EXT:
+            for (size_t i = 0; i < value.size(); i++)
+            {
+                if (value[i][0] != '.')
+                    return false;
+                if (!isFilename(value[i].substr(1)))
+                    return false;
+            }
+                return true;
         case MAP:
             if (value.size() < 2)
                 return false;
@@ -47,9 +55,9 @@ bool validateType(Type t, const std::vector<std::string>& value)
                 if (!isErrorCode(value[i]))
                     return false;
             }
-            if (!isPath(value.back()))
-                return false;
-            return true;
+            return isPath(value.back());
+        case REDIRECT:
+            return isRedirect(value);
         default:
             return false;
     }
@@ -67,6 +75,10 @@ bool validateType(Type t, const std::string& value)
             return isPath(value);
         case BOOLEAN:
             return isBoolean(value);
+        case SIZE:
+            return isSize(value);
+        case TIME:
+            return isTime(value);
         default:
             return false;
     }

@@ -20,6 +20,8 @@ const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
             {"index", FILENAME},
             {"server_name", DOMAIN},
             {"error_page", MAP},
+            {"client_max_body_size", SIZE},
+            {"timeout", TIME},
             {"location", BLOCK}
         }
     },
@@ -28,7 +30,12 @@ const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
             {"root", PATH},
             {"autoindex", BOOLEAN},
             {"index", FILENAME},
-            {"allow_methods", METH}
+            {"allow_methods", METH},
+            {"upload_path", PATH},
+            {"cgi_extension", CGI_EXT},
+            {"cgi_path", PATH},
+            {"client_max_body_size", SIZE},
+            {"return", REDIRECT}
         }
     }
 };
@@ -147,7 +154,109 @@ bool isLocationPath(const std::string& str)
     return true;
 }
 
+bool isSize(const std::string& str)
+{
+    if (str.empty())
+        return false;
+    std::string numbers;
+    char suffix = '\0';
+    if (!std::isdigit(str.back()))
+    {
+        suffix = std::toupper(str.back());
+        if (suffix != 'K' && suffix != 'M' && suffix != 'G')
+            return false;
+        numbers = str.substr(0, str.size() - 1);
+    }
+    else
+        numbers = str;
+    if (!isNumber(numbers))
+        return false;
+    try
+    {
+        long size = std::stol(numbers);
+        if (size < 0)
+            return false;
+        if (suffix == 'G' && size > 10)
+            return false;
+        if (suffix == 'M' && size > 10240)
+            return false;     
+        return true;
+    }
+    catch (const std::exception&)
+    {
+        return false;
+    }
+}
+
 bool isBoolean(const std::string& str)
 {
     return str == "on" || str == "off";
+}
+
+size_t parseSize(const std::string& str)
+{
+    std::string numbers;
+    char suffix = '\0';
+    
+    if (!std::isdigit(str.back()))
+    {
+        suffix = std::toupper(str.back());
+        numbers = str.substr(0, str.size() - 1);
+    }
+    else
+        numbers = str;
+    
+    size_t size = std::stoul(numbers);
+    switch (suffix)
+    {
+        case 'K': return size * 1024;
+        case 'M': return size * 1024 * 1024;
+        case 'G': return size * 1024 * 1024 * 1024;
+        default: return size;
+    }
+}
+
+bool isTime(const std::string& str)
+{
+    if (str.empty())
+        return false;
+    if (!isNumber(str))
+        return false;
+    try
+    {
+        int x = stoi(str);
+        if (x < 1 || x > 86400)
+            return false;
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        return false;
+    }
+}
+
+bool isRedirect(const std::vector<std::string>& values)
+{
+    if (values.size() != 2)
+        return false;
+    if (!isNumber(values[0]))
+        return false;
+    try
+    {
+        int code = std::stoi(values[0]);
+        return code == 301 || code == 302 || code == 303 || 
+               code == 307 || code == 308;
+    }
+    catch (const std::exception&)
+    {
+        return false;
+    }
+    return isPath(values[1]) || isUrl(values[1]);
+}
+
+bool isUrl(const std::string& str)
+{
+    if (str.find("http://") == 0 || str.find("https://") == 0)
+        return str.length() > 7;
+    return false;
 }

@@ -21,8 +21,13 @@ struct LocationConfig
 {
     std::string path;
     std::string root;
+    std::string cgi_path;
+    std::string upload_path;
     bool autoindex = 0;
-    std::vector<std::string> index_files;
+    size_t client_max_body_size = 0;
+    std::vector<std::string> cgi_extension;
+    std::vector<std::string> return_;
+    std::vector<std::string> index;
     std::vector<std::string> allow_methods;
 };
 
@@ -31,8 +36,10 @@ struct ServerConfig
     std::vector<std::string> server_name;
     int listen_port = 0;
     std::string root;
-    std::vector<std::string> index_files;
-    std::map<int, std::string> error_pages;
+    int timeout;
+    size_t client_max_body_size = 0;
+    std::vector<std::string> index;
+    std::map<int, std::string> error_page;
     std::vector<LocationConfig> locations;
 };
 
@@ -56,6 +63,10 @@ enum Type
     DOMAIN,
     MAP,
     BLOCK,
+    SIZE,
+    REDIRECT,
+    TIME,
+    CGI_EXT,
     METH
 };
 
@@ -91,6 +102,13 @@ class ConfigParser
     void parseServer(const std::vector<std::string>& tokens, size_t& i);
     void parseLocation(const std::vector<std::string>& tokens, size_t& i, ServerConfig& serv);
 
+    // Print helper
+    void printGlobalConfig() const;
+    void printServerConfig(const ServerConfig& server, size_t idx) const;
+    void printLocation(const LocationConfig& loc, size_t idx) const;
+    void printList(const std::vector<std::string>& list) const;
+    void printMap(const std::map<int, std::string>& m) const;
+
     public:
     ConfigParser();
     ~ConfigParser();
@@ -119,6 +137,12 @@ bool isPort(const std::string& str);
 bool isErrorCode(const std::string& str);
 bool isWorkerProcesses(const std::string& str);
 bool isLocationPath(const std::string& str);
+bool isSize(const std::string& str);
+bool isUrl(const std::string& str);
+bool isTime(const std::string& str);
+bool isRedirect(const std::vector<std::string>& values);
+
 bool validLine(std::string str);
+size_t parseSize(const std::string& str);
 
 #endif
