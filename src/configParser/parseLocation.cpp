@@ -11,6 +11,8 @@ void ConfigParser::setLocationDefaults(ServerConfig& serv)
             serv.locations[i].index = serv.index;
         if (serv.locations[i].allow_methods.empty())
             serv.locations[i].allow_methods = {"GET"};
+        if (serv.locations[i].client_max_body_size == 0)
+            serv.locations[i].client_max_body_size = serv.client_max_body_size;
     }
 }
 

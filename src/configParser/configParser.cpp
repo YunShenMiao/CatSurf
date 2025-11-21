@@ -1,90 +1,46 @@
 #include "../../include/configParser.hpp"
-#include <iostream>
 #include <fstream>
 #include <sstream>
-#include <vector>
 #include <algorithm>
-// parse config: look for file extension - order: global (or missing) - server must have listen, server_name; root & error & location optional { location{}}
 
-ConfigParser::ConfigParser() {}
+/***********************************************************/
+/*               CONSTRUCTOR & DESTRUCTOR                  */
+/***********************************************************/
+
+ConfigParser::ConfigParser(): ConfigPath("config/default.conf") {}
+
+ConfigParser::ConfigParser(std::string path): ConfigPath(path) {}
+
+ConfigParser::ConfigParser(const ConfigParser& other): ConfigPath(other.ConfigPath) {}
+
+ConfigParser& ConfigParser::operator=(const ConfigParser& other)
+{
+    if (this != &other)
+        ConfigPath = other.ConfigPath;
+    return *this;
+}
 
 ConfigParser::~ConfigParser() {}
 
-bool validateType(Type t, const std::vector<std::string>& value)
+/***********************************************************/
+/*                          GETTER                         */
+/***********************************************************/
+
+const GlobalConfig& ConfigParser::getGlobalConfig() const
 {
-    if (value.empty())
-        return false;
-    switch(t)
-    {
-        case METH:
-            for (size_t i = 0; i < value.size(); i++)
-            {
-                std::cout << isMethod(value[i]) << std::endl;
-                if (!isMethod(value[i]))
-                    return false;
-            }
-                return true;
-        case DOMAIN:
-            for (size_t i = 0; i < value.size(); i++)
-            {
-                if (!isDomainname(value[i]))
-                    return false;
-            }
-                return true;
-        case FILENAME:
-            for (size_t i = 0; i < value.size(); i++)
-            {
-                if (!isFilename(value[i]))
-                    return false;
-            }
-                return true;
-        case CGI_EXT:
-            for (size_t i = 0; i < value.size(); i++)
-            {
-                if (value[i][0] != '.')
-                    return false;
-                if (!isFilename(value[i].substr(1)))
-                    return false;
-            }
-                return true;
-        case MAP:
-            if (value.size() < 2)
-                return false;
-            for (size_t i = 0; i < value.size() - 1; i++)
-            {
-                if (!isErrorCode(value[i]))
-                    return false;
-            }
-            return isPath(value.back());
-        case REDIRECT:
-            return isRedirect(value);
-        default:
-            return false;
-    }
+    return global_config;
 }
 
-bool validateType(Type t, const std::string& value)
+const std::vector<ServerConfig>& ConfigParser::getServers() const
 {
-    switch (t) 
-    {
-        case PORT:
-            return isPort(value);
-        case WORK_PRC:
-            return isWorkerProcesses(value);
-        case PATH:
-            return isPath(value);
-        case BOOLEAN:
-            return isBoolean(value);
-        case SIZE:
-            return isSize(value);
-        case TIME:
-            return isTime(value);
-        default:
-            return false;
-    }
+    return servers;
 }
 
-bool validLine(std::string str)
+/***********************************************************/
+/*                    PARSE & TOKENIZE                     */
+/***********************************************************/
+
+bool ConfigParser::validLine(std::string str)
 {
     str.erase(std::remove_if(str.begin(), str.end(), 
               [](unsigned char c) { return std::isspace(c); }), 
@@ -99,11 +55,11 @@ bool validLine(std::string str)
     return true;
 }
 
-std::vector<std::string> tokenizeFile(const std::string& path)
+std::vector<std::string> ConfigParser::tokenizeFile()
 {
-    std::ifstream file(path);
+    std::ifstream file(ConfigPath);
     if (!file.is_open())
-        throw std::runtime_error("Cannot open file: " + path);
+        throw std::runtime_error("Cannot open file: " + ConfigPath);
     
     std::vector<std::string> tokens;
     std::string line;
@@ -133,9 +89,9 @@ std::vector<std::string> tokenizeFile(const std::string& path)
     return tokens;
 }
 
-void ConfigParser::parse(const std::string& path)
+void ConfigParser::parse()
 {
-    std::vector<std::string> tokens = tokenizeFile(path);
+    std::vector<std::string> tokens = tokenizeFile();
 
     size_t i = 0;
 
@@ -150,14 +106,4 @@ void ConfigParser::parse(const std::string& path)
     }
     if (servers.empty())
         throw std::runtime_error("No server blocks found in config file");
-}
-
-const GlobalConfig& ConfigParser::getGlobalConfig() const
-{
-    return global_config;
-}
-
-const std::vector<ServerConfig>& ConfigParser::getServers() const
-{
-    return servers;
 }

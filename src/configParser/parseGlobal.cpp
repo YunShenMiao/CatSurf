@@ -4,8 +4,6 @@
 
 void ConfigParser::setDefaultGC()
 {
-    if (global_config.worker_processes == 0)
-        global_config.worker_processes = std::thread::hardware_concurrency();
     if (global_config.error_log.empty())
         global_config.error_log = "./logs/error.log";
     if (global_config.pid.empty())
@@ -14,14 +12,7 @@ void ConfigParser::setDefaultGC()
 
 void ConfigParser::setGlobalDirective(const std::string& key, const std::string& value)
 {
-    if (key == "worker_processes")
-    {
-        if (value == "auto")
-            global_config.worker_processes = std::thread::hardware_concurrency();
-        else
-            global_config.worker_processes = std::stoi(value);
-    }
-    else if (key == "error_log")
+    if (key == "error_log")
         global_config.error_log = value;
     else if (key == "pid")
         global_config.pid = value;

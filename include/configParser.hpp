@@ -12,7 +12,6 @@
 
 struct GlobalConfig
 {
-    unsigned int worker_processes = 0;
     std::string error_log;
     std::string pid;
 };
@@ -84,24 +83,29 @@ enum Block
 class ConfigParser
 {
     private:
-    static const std::map<Block, std::map<std::string, Type>> grammar;
 
+    static const std::map<Block, std::map<std::string, Type>> grammar;
     GlobalConfig global_config;
     std::vector<ServerConfig> servers;
-    int server_amnt;
+    std::string ConfigPath;
 
+    //tokenizer
+    std::vector<std::string> tokenizeFile();
+    bool validLine(std::string str);
+    //parsing blocks
     void parseGlobalConfig(const std::vector<std::string>& tokens, size_t& i);
+    void parseServer(const std::vector<std::string>& tokens, size_t& i);
+    void parseLocation(const std::vector<std::string>& tokens, size_t& i, ServerConfig& serv);
+    // setter default
     void setDefaultGC();
     void setServerDefaults(ServerConfig &serv);
     void setLocationDefaults(ServerConfig& serv);
+    // setter
     void setServerDirective(const std::string& key, const std::string& value, Type t, ServerConfig& serv);
     void setServerDirective(const std::string& key, const std::vector<std::string>& value, Type t, ServerConfig& serv);
     void setLocDirective(const std::string& key, const std::string& value, Type t, LocationConfig& loc);
     void setLocDirective(const std::string& key, const std::vector<std::string>& value, Type t, LocationConfig& loc);
     void setGlobalDirective(const std::string& key, const std::string& value);
-    void parseServer(const std::vector<std::string>& tokens, size_t& i);
-    void parseLocation(const std::vector<std::string>& tokens, size_t& i, ServerConfig& serv);
-
     // Print helper
     void printGlobalConfig() const;
     void printServerConfig(const ServerConfig& server, size_t idx) const;
@@ -110,12 +114,17 @@ class ConfigParser
     void printMap(const std::map<int, std::string>& m) const;
 
     public:
+    // ocf
     ConfigParser();
+    ConfigParser(std::string path);
+    ConfigParser(const ConfigParser& other);
+    ConfigParser& operator=(const ConfigParser& other);
     ~ConfigParser();
-
-    void parse(const std::string& path);
+    // getter
     const GlobalConfig& getGlobalConfig() const;
     const std::vector<ServerConfig>& getServers() const;
+    // parse&print
+    void parse();
     void test_print();
 };
 
@@ -123,8 +132,7 @@ class ConfigParser
 /*                  EXTERNAL FUNCTIONS                     */
 /***********************************************************/
 
-
-std::vector<std::string> tokenizeFile(const std::string& path);
+// Grammar Validation Functions
 bool validateType(Type t, const std::string& value);
 bool validateType(Type t, const std::vector<std::string>& value);
 bool isNumber(const std::string& str);
@@ -133,16 +141,13 @@ bool isBoolean(const std::string& str);
 bool isFilename(const std::string& str);
 bool isDomainname(const std::string& str);
 bool isMethod(const std::string& str);
-bool isPort(const std::string& str);
+bool isPortIP(const std::string& str);
 bool isErrorCode(const std::string& str);
-bool isWorkerProcesses(const std::string& str);
 bool isLocationPath(const std::string& str);
 bool isSize(const std::string& str);
 bool isUrl(const std::string& str);
 bool isTime(const std::string& str);
 bool isRedirect(const std::vector<std::string>& values);
-
-bool validLine(std::string str);
 size_t parseSize(const std::string& str);
 
 #endif

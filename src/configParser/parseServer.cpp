@@ -19,6 +19,10 @@ void ConfigParser::setServerDefaults(ServerConfig &serv)
         serv.index = {"index.html"};
     if (serv.error_page.empty())
         serv.error_page = {{404, "/404.html"}, {500, "/50x.html"}};
+    if (serv.client_max_body_size == 0)
+        serv.client_max_body_size = 1024 * 1024;
+    if (serv.timeout == 0)
+        serv.timeout = 60;
 }
 
 void ConfigParser::setServerDirective(const std::string& key, const std::string& value, Type t, ServerConfig& serv)

@@ -1,14 +1,9 @@
 #include "../../include/configParser.hpp"
 
-// what inside locations?
-// default for anything besides listen
-// client_max_body_size?
-
 const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
 {
     {GLOBAL, 
         {
-            {"worker_processes", WORK_PRC},
             {"error_log", PATH},
             {"pid", PATH}
         }
@@ -39,6 +34,78 @@ const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
         }
     }
 };
+
+bool validateType(Type t, const std::vector<std::string>& value)
+{
+    if (value.empty())
+        return false;
+    switch(t)
+    {
+        case METH:
+            for (size_t i = 0; i < value.size(); i++)
+            {
+                std::cout << isMethod(value[i]) << std::endl;
+                if (!isMethod(value[i]))
+                    return false;
+            }
+                return true;
+        case DOMAIN:
+            for (size_t i = 0; i < value.size(); i++)
+            {
+                if (!isDomainname(value[i]))
+                    return false;
+            }
+                return true;
+        case FILENAME:
+            for (size_t i = 0; i < value.size(); i++)
+            {
+                if (!isFilename(value[i]))
+                    return false;
+            }
+                return true;
+        case CGI_EXT:
+            for (size_t i = 0; i < value.size(); i++)
+            {
+                if (value[i][0] != '.')
+                    return false;
+                if (!isFilename(value[i].substr(1)))
+                    return false;
+            }
+                return true;
+        case MAP:
+            if (value.size() < 2)
+                return false;
+            for (size_t i = 0; i < value.size() - 1; i++)
+            {
+                if (!isErrorCode(value[i]))
+                    return false;
+            }
+            return isPath(value.back());
+        case REDIRECT:
+            return isRedirect(value);
+        default:
+            return false;
+    }
+}
+
+bool validateType(Type t, const std::string& value)
+{
+    switch (t) 
+    {
+        case PORT:
+            return isPortIP(value);
+        case PATH:
+            return isPath(value);
+        case BOOLEAN:
+            return isBoolean(value);
+        case SIZE:
+            return isSize(value);
+        case TIME:
+            return isTime(value);
+        default:
+            return false;
+    }
+}
 
 bool isMethod(const std::string& str)
 {
@@ -93,30 +160,34 @@ bool isErrorCode(const std::string& str)
     }
 }
 
-bool isWorkerProcesses(const std::string& str)
-{
-    if (!str.empty() && str == "auto")
-        return true;
-    if (!isNumber(str))
-        return false;
-    try
-    {
-        int workers = std::stoi(str);
-        return (workers >= 0 && workers <= 1024);
-    }
-    catch (const std::exception&)
-    {
-        return false;
-    }
-}
-
-bool isPort(const std::string& str)
+bool isPortIP(const std::string& str)
 {
     if (!isNumber(str))
-        return false;
+    {
+        size_t div = str.find(':');
+        if (div != std::string::npos)
+        {
+            std::string ip = str.substr(0, div);
+            std::string port = str.substr(div + 1);
+            int dots = 0;
+            for (char c : ip) 
+            {
+                if (c == '.')
+                    dots++;
+                else if (!std::isdigit(c))
+                    return false;
+            }
+            if (dots != 3)
+                return false;
+        }
+        else
+            return false;
+    }
+    else
+        std::string port = str;
     try 
     {
-        int a = stoi(str);
+        int a = std::stoi(port);
         return a > 1 && a < 65535;
     }
     catch (const std::exception& e)
@@ -224,7 +295,7 @@ bool isTime(const std::string& str)
         return false;
     try
     {
-        int x = stoi(str);
+        int x = std::stoi(str);
         if (x < 1 || x > 86400)
             return false;
         return true;

@@ -9,7 +9,6 @@
 void ConfigParser::printGlobalConfig() const
 {
     std::cout << BLUE << "Global Config:" << RESET << std::endl;
-    std::cout << std::setw(18) << "worker_processes:" << global_config.worker_processes << std::endl;
     std::cout << std::setw(18) << "error_log:" << global_config.error_log << std::endl;
     std::cout << std::setw(18) << "pid:" << global_config.pid << std::endl;
     std::cout << RED << "------------------------------------------------" << RESET << std::endl;

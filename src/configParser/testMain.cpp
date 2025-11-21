@@ -55,15 +55,10 @@
 
 int main(int argc, char *argv[])
 {
-    if (argc != 2)
-    {
-        std::cerr << "invalid amount of arguments: <programname + configfile>" << std::endl;
-        return 1;
-    }
-    ConfigParser test;
+    ConfigParser test = (argc > 1) ? ConfigParser(argv[1]) : ConfigParser();
     try
     {
-        test.parse(argv[1]);
+        test.parse();
         test.test_print();
     }
     catch (const std::exception& e)
