@@ -15,7 +15,8 @@
 // \r\n
 // 505 HTTP Version Not Supported for http version besides 1.0 & 1.1
 
-/* struct ParseResult {
+/* struct ParseResult
+{
     bool ok;                     // true if parsing succeeded
     int error_code;              // HTTP status code (0 if no error)
     Request request;             // filled only if ok == true
@@ -87,6 +88,12 @@ void HttpRequest::printRequest()
     std::cout << "======================\n";
 }
 
+void HttpRequest::printError()
+{
+    std::cout << "ErrorCode: " << error_code << std::endl;
+    std::cout << "ErrorInfo: " << error_info << std::endl;
+}
+
 bool isMethod(const std::string& str)
 {
     if (str.empty())
@@ -106,7 +113,16 @@ bool validateHttpV(std::string str)
 {
     if (str.empty())
         return false;
+    else if (str != "HTTP/1.1" && str != "HTTP/1.0")
+        return false;
     return true;
+}
+
+void HttpRequest::setError(ErrorCode type, std::string info)
+{
+    error_code = type;
+    error_info = info;
+    throw std::runtime_error(info);
 }
 
 // check specifically for valid method, valid uri & http version
@@ -117,25 +133,25 @@ void HttpRequest::parseSL(std::string cont)
     while (i < cont.size() && cont[i] != ' ')
         i++;
     if (i >= cont.size() || cont[i] != ' ')
-        throw std::runtime_error("Invalid request line" + cont);
+        setError(BadRequest, "Invalid Request line");
     method = cont.substr(start, i - start);
     if (!isMethod(method))
-        throw std::runtime_error("Invalid method: " + method);
+        setError(BadRequest, "Invalid method in Request line");
     i++;
     start = i;
 
     while (i < cont.size() && cont[i] != ' ')
         i++;
     if (i >= cont.size() || cont[i] != ' ')
-        throw std::runtime_error("Invalid request line" + cont);
+        setError(BadRequest, "Invalid Request line");
     uri = cont.substr(start, i - start);
     if (!validateURI(uri))
-        throw std::runtime_error("Invalid URI: " + uri); 
+        setError(BadRequest, "Invalid URI in Request line"); 
     i++;
 
     http_v = cont.substr(i);
     if (!validateHttpV(http_v))
-        throw std::runtime_error("Invalid HTTP version: " + http_v);
+        setError(BadRequest, "Invalid HTTP version in Request line");
 }
 
 void skipWhitespace(const std::string& str, size_t& i)
@@ -164,17 +180,16 @@ bool validateHeader(std::string key, std::string value)
 void HttpRequest::parseHeader(std::string cont)
 {
     size_t i = 0;
-    std::cout << "cont: " << cont << std::endl;
     while (i < cont.size())
     {
         size_t key_end = cont.find(':', i);
-        if (key_end == std::string::npos)
-            throw std::runtime_error("Invalid header: missing colon");
+        if (key_end == std::string::npos || key_end == i)
+            setError(BadRequest, "Invalid header");
         std::string key = cont.substr(i, key_end - i);
         i = key_end + 1;
         skipWhitespace(cont, i);
         if (i >= cont.size())
-            throw std::runtime_error("");
+            setError(BadRequest, "Invalid header");
         
         size_t value_end = cont.find("\r\n", i);
         
@@ -182,7 +197,7 @@ void HttpRequest::parseHeader(std::string cont)
         headers.insert({key, value});
 
         if (!validateHeader(key, value))
-            throw std::runtime_error("Invalid header in http request: " + key + ", " + value);
+            setError(BadRequest, "Invalid header");
         if (value_end == std::string::npos)
             break;
         i = value_end + 2;
@@ -217,7 +232,6 @@ HttpRequest::ParseState HttpRequest::parseChunkedBody(std::string& buffer)
 HttpRequest::ParseState HttpRequest::parseRequest(const char* data, size_t len)
 {
     buffer.append(data, len);
-    std::cout << "state :" << state << std::endl;
 
     while (state != COMPLETE && state != ERROR)
     {
@@ -228,7 +242,6 @@ HttpRequest::ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 return state;
             try
             {
-                std::cout << "miao2" << std::endl; 
                 parseSL(buffer.substr(0, pos));
                 buffer.erase(0, pos + 2);
                 state = HEADERS;
@@ -245,10 +258,15 @@ HttpRequest::ParseState HttpRequest::parseRequest(const char* data, size_t len)
             std::cout << "pos: " << pos << std::endl;
             if (pos == std::string::npos)
                 return state;
+            else if (pos > MAX_HEADER_SIZE)
+            {
+                setError(BadRequest, "invalid header");
+                state = ERROR;
+                return state;
+            }
             try
             {
                 parseHeader(buffer.substr(0, pos));
-                std::cout << "header size: " << headers.size() << std::endl;
                 buffer.erase(0, pos + 4);
                 if (!getHeaderVal("content-length").empty())
                     content_length = std::stoi(getHeaderVal("content-length"));

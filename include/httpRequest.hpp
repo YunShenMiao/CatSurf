@@ -5,6 +5,15 @@
 #include <map>
 #include <optional>
 
+#define MAX_HEADER_SIZE 8000
+
+enum ErrorCode
+{
+    BadRequest = 400,
+    PayloadTooLarge = 413,
+    HTTPVersionNotSupported = 505
+};
+
 class HttpRequest 
 {
     private:
@@ -16,6 +25,8 @@ class HttpRequest
     std::map<std::string, std::string> headers;
     std::string body;
     size_t content_length;
+    int error_code;
+    std::string error_info;
     bool is_complete;
     
     public:
@@ -31,6 +42,7 @@ class HttpRequest
     void parseSL(std::string cont);
     void parseHeader(std::string cont);
     ParseState parseChunkedBody(std::string& buffer);
+    void setError(ErrorCode type, std::string info);
     
     // Getters
     const std::string& getMethod() const;
@@ -39,6 +51,7 @@ class HttpRequest
 
     //print
     void printRequest();
+    void printError();
 };
 
 bool validateURI(std::string str);
