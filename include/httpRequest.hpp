@@ -5,7 +5,10 @@
 #include <map>
 #include <optional>
 
-#define MAX_HEADER_SIZE 8000
+#define MAX_HEADER_SIZE 64000
+#define MAX_HEADER_LINE 8000
+#define MAX_REQUEST_LINE 8000
+#define MAX_URI 6000
 
 enum ErrorCode
 {
