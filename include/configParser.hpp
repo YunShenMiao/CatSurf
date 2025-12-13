@@ -6,6 +6,8 @@
 #include <vector>
 #include <iostream>
 
+// need to check for ip:port uniqueness
+
 /***********************************************************/
 /*                       STRUCTS                           */
 /***********************************************************/
@@ -42,11 +44,11 @@ struct ServerConfig
     std::vector<LocationConfig> locations;
 };
 
-struct Config
+/* struct Config
 {
     GlobalConfig global;
     std::vector<ServerConfig> servers;
-};
+}; */
 
 /***********************************************************/
 /*                       ENUM                              */
