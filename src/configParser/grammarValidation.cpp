@@ -1,5 +1,5 @@
 #include "../../include/configParser.hpp"
-
+//return redirect catsurf.com -> catsurf.de (fast cgi pass) -> 
 const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
 {
     {GLOBAL, 

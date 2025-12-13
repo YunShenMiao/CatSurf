@@ -124,6 +124,7 @@ bool validateURI(const std::string& str)
     } 
     return true;
 }
+//
 
 bool validateHttpV(std::string str)
 {
