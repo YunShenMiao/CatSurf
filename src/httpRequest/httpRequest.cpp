@@ -1,7 +1,7 @@
 #include "../../include/httpRequest.hpp"
 #include "../../include/configParser.hpp"
 #include <iostream>
-#include <optional>
+#include <cctype>
 
 // start line (METHOD URI HTTP/1.1 \r\n) (needs to have those + one space inbetween, no extra spaces (trailing, leading, inbetween))
 // headers (Host, Content-Length, Transfer-Encoding) (key:(ows)value(ows)/r/n /r/n/r/n)
@@ -67,7 +67,7 @@ const std::string& HttpRequest::getUri() const
 
 const std::string HttpRequest::getHeaderVal(const std::string& key) const
 {
-    auto it = headers.find("Content-Length");
+    auto it = headers.find(key);
     if (it != headers.end())
         return (headers.find(key))->second;
     return "";
@@ -102,10 +102,26 @@ bool isMethod(const std::string& str)
     return str == "GET" || str == "POST" || str == "DELETE";
 }
 
-bool validateURI(std::string str)
+bool validateURI(const std::string& str)
 {
-    if (str.empty())
+    if (str.empty() || str.size() > MAX_URI)
         return false;
+    if (str[0] != '/')
+        return false;
+
+    std::string allowed = "-._~/?#&=:@!$\\()*+,;%";
+    for (size_t i = 0; i < str.size(); i++)
+    {
+        if (!isalnum(static_cast<unsigned char>(key[i])) && allowed.find(key[i]) == std::string::npos)
+            return false;
+        if (c == '%')
+        {
+            if (i + 2 >= str.size() || 
+                !isxdigit(str[i+1]) || !isxdigit(str[i+2]))
+                return false;
+            i += 2;
+        }
+    } 
     return true;
 }
 
@@ -122,6 +138,7 @@ void HttpRequest::setError(ErrorCode type, std::string info)
 {
     error_code = type;
     error_info = info;
+    state = ERROR;
     throw std::runtime_error(info);
 }
 
@@ -177,6 +194,13 @@ bool validateHeader(std::string key, std::string value)
 }
 //
 
+std::string str_tolower(std::string s)
+{
+    std::transform(s.begin(), s.end(), s.begin(),
+        [](unsigned char c) { return std::tolower(c); });
+    return s;
+}
+
 void HttpRequest::parseHeader(std::string cont)
 {
     size_t i = 0;
@@ -185,7 +209,7 @@ void HttpRequest::parseHeader(std::string cont)
         size_t key_end = cont.find(':', i);
         if (key_end == std::string::npos || key_end == i)
             setError(BadRequest, "Invalid header");
-        std::string key = cont.substr(i, key_end - i);
+        std::string key = str_tolower(cont.substr(i, key_end - i));
         i = key_end + 1;
         skipWhitespace(cont, i);
         if (i >= cont.size())
@@ -202,6 +226,8 @@ void HttpRequest::parseHeader(std::string cont)
             break;
         i = value_end + 2;
     }
+    if ((getHeaderVal("host")).empty())
+        setError(BadRequest, "Invalid header: missing host");
 }
 
 HttpRequest::ParseState HttpRequest::parseChunkedBody(std::string& buffer)
@@ -237,6 +263,11 @@ HttpRequest::ParseState HttpRequest::parseRequest(const char* data, size_t len)
     {
         if (state == REQUEST_LINE) 
         {
+            if (buffer.size() > MAX_REQUEST_LINE)
+            {
+                setError(BadRequest, "invalid or too long request line");
+                return state;
+            }
             size_t pos = buffer.find("\r\n");
             if (pos == std::string::npos)
                 return state;
@@ -254,16 +285,14 @@ HttpRequest::ParseState HttpRequest::parseRequest(const char* data, size_t len)
         }
         else if (state == HEADERS) 
         {
-            size_t pos = buffer.find("\r\n\r\n");
-            std::cout << "pos: " << pos << std::endl;
-            if (pos == std::string::npos)
-                return state;
-            else if (pos > MAX_HEADER_SIZE)
+            if (buffer.size() > MAX_HEADER_SIZE)
             {
                 setError(BadRequest, "invalid header");
-                state = ERROR;
                 return state;
             }
+            size_t pos = buffer.find("\r\n\r\n");
+            if (pos == std::string::npos)
+                return state;
             try
             {
                 parseHeader(buffer.substr(0, pos));
