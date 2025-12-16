@@ -2,6 +2,7 @@
 #include "../../include/configParser.hpp"
 #include <iostream>
 #include <cctype>
+#include <algorithm>
 
 // start line (METHOD URI HTTP/1.1 \r\n) (needs to have those + one space inbetween, no extra spaces (trailing, leading, inbetween))
 // headers (Host, Content-Length, Transfer-Encoding) (key:(ows)value(ows)/r/n /r/n/r/n)
@@ -15,13 +16,7 @@
 // \r\n
 // 505 HTTP Version Not Supported for http version besides 1.0 & 1.1
 
-/* struct ParseResult
-{
-    bool ok;                     // true if parsing succeeded
-    int error_code;              // HTTP status code (0 if no error)
-    Request request;             // filled only if ok == true
-};
-
+/*
 some error codes returned by parser
 Condition	Parser error_code	Server responds
 Invalid request line	400	400 Bad Request
@@ -33,9 +28,9 @@ Invalid Content-Length	400	400 Bad Request
 Body too large	413	413 Payload Too Large */
 // i need to check my error handlong since i dpnt want to exit program if theres an error but handle it in response and go to response immediately
 
-HttpRequest::HttpRequest (): state(ParseState::REQUEST_LINE) {}
+HttpRequest::HttpRequest (): content_length(0), error_code(0), is_complete(false), state(REQUEST_LINE) {}
 
-HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length) , is_complete(other.is_complete) {}
+HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length) , is_complete(other.is_complete), state(other.state) {}
 
 HttpRequest& HttpRequest::operator=(const HttpRequest& other)
 {
@@ -49,11 +44,16 @@ HttpRequest& HttpRequest::operator=(const HttpRequest& other)
         body = other.body;
         content_length = other.content_length;
         is_complete = other.is_complete;
+        state = other.state;
     }
     return *this;
 }
 
 HttpRequest::~HttpRequest() {}
+
+/***********************************************************/
+/*                          GETTER                         */
+/***********************************************************/
 
 const std::string& HttpRequest::getMethod() const 
 {
@@ -69,10 +69,20 @@ const std::string HttpRequest::getHeaderVal(const std::string& key) const
 {
     auto it = headers.find(key);
     if (it != headers.end())
-        return (headers.find(key))->second;
+        return it->second;
     return "";
 }
 
+/***********************************************************/
+/*                          HELPER                         */
+/***********************************************************/
+
+std::string str_tolower(std::string s)
+{
+    std::transform(s.begin(), s.end(), s.begin(),
+        [](unsigned char c) { return std::tolower(c); });
+    return s;
+}
 
 void HttpRequest::printRequest()
 {
@@ -94,6 +104,24 @@ void HttpRequest::printError()
     std::cout << "ErrorInfo: " << error_info << std::endl;
 }
 
+void HttpRequest::setError(ErrorCode type, std::string info)
+{
+    error_code = type;
+    error_info = info;
+    state = ERROR;
+    throw std::runtime_error(info);
+}
+
+void skipWhitespace(const std::string& str, size_t& i)
+{
+    while (i < str.size() && (str[i] == ' ' || str[i] == '\t'))
+        i++;
+}
+
+/***********************************************************/
+/*                      VALIDATION                         */
+/***********************************************************/
+
 bool isMethod(const std::string& str)
 {
     if (str.empty())
@@ -102,7 +130,7 @@ bool isMethod(const std::string& str)
     return str == "GET" || str == "POST" || str == "DELETE";
 }
 
-bool validateURI(const std::string& str)
+bool validateURI(std::string& str)
 {
     if (str.empty() || str.size() > MAX_URI)
         return false;
@@ -112,9 +140,9 @@ bool validateURI(const std::string& str)
     std::string allowed = "-._~/?#&=:@!$\\()*+,;%";
     for (size_t i = 0; i < str.size(); i++)
     {
-        if (!isalnum(static_cast<unsigned char>(key[i])) && allowed.find(key[i]) == std::string::npos)
+        if (!isalnum(static_cast<unsigned char>(str[i])) && allowed.find(str[i]) == std::string::npos)
             return false;
-        if (c == '%')
+        if (str[i] == '%')
         {
             if (i + 2 >= str.size() || 
                 !isxdigit(str[i+1]) || !isxdigit(str[i+2]))
@@ -124,7 +152,6 @@ bool validateURI(const std::string& str)
     } 
     return true;
 }
-//
 
 bool validateHttpV(std::string str)
 {
@@ -133,49 +160,6 @@ bool validateHttpV(std::string str)
     else if (str != "HTTP/1.1" && str != "HTTP/1.0")
         return false;
     return true;
-}
-
-void HttpRequest::setError(ErrorCode type, std::string info)
-{
-    error_code = type;
-    error_info = info;
-    state = ERROR;
-    throw std::runtime_error(info);
-}
-
-// check specifically for valid method, valid uri & http version
-void HttpRequest::parseSL(std::string cont)
-{
-    size_t i = 0;
-    size_t start = 0;
-    while (i < cont.size() && cont[i] != ' ')
-        i++;
-    if (i >= cont.size() || cont[i] != ' ')
-        setError(BadRequest, "Invalid Request line");
-    method = cont.substr(start, i - start);
-    if (!isMethod(method))
-        setError(BadRequest, "Invalid method in Request line");
-    i++;
-    start = i;
-
-    while (i < cont.size() && cont[i] != ' ')
-        i++;
-    if (i >= cont.size() || cont[i] != ' ')
-        setError(BadRequest, "Invalid Request line");
-    uri = cont.substr(start, i - start);
-    if (!validateURI(uri))
-        setError(BadRequest, "Invalid URI in Request line"); 
-    i++;
-
-    http_v = cont.substr(i);
-    if (!validateHttpV(http_v))
-        setError(BadRequest, "Invalid HTTP version in Request line");
-}
-
-void skipWhitespace(const std::string& str, size_t& i)
-{
-    while (i < str.size() && (str[i] == ' ' || str[i] == '\t'))
-        i++;
 }
 
 bool validateHeader(std::string key, std::string value)
@@ -193,13 +177,37 @@ bool validateHeader(std::string key, std::string value)
     }
     return true;
 }
-//
 
-std::string str_tolower(std::string s)
+/***********************************************************/
+/*                        PARSING                          */
+/***********************************************************/
+
+void HttpRequest::parseSL(std::string cont)
 {
-    std::transform(s.begin(), s.end(), s.begin(),
-        [](unsigned char c) { return std::tolower(c); });
-    return s;
+    while (cont.size() >= 2 && cont[0] == '\r' && cont[1] == '\n')
+        cont.erase(0, 2);
+
+    size_t start = 0;
+    size_t end = cont.find(' ', start);
+
+    if (end == std::string::npos)
+        setError(BadRequest, "Invalid Request line");
+    method = cont.substr(start, end);
+    if (!isMethod(method))
+        setError(BadRequest, "Invalid method in Request line");
+
+    start = end + 1;
+    end = cont.find(' ', start);
+    if (end == std::string::npos)
+        setError(BadRequest, "Invalid Request line");
+    uri = cont.substr(start, end - start);
+    if (!validateURI(uri))
+        setError(BadRequest, "Invalid URI in Request line"); 
+    
+    start = end + 1;
+    http_v = cont.substr(start);
+    if (!validateHttpV(http_v))
+        setError(BadRequest, "Invalid HTTP version in Request line");
 }
 
 void HttpRequest::parseHeader(std::string cont)
@@ -213,50 +221,77 @@ void HttpRequest::parseHeader(std::string cont)
         std::string key = str_tolower(cont.substr(i, key_end - i));
         i = key_end + 1;
         skipWhitespace(cont, i);
-        if (i >= cont.size())
-            setError(BadRequest, "Invalid header");
         
         size_t value_end = cont.find("\r\n", i);
-        
+
         std::string value = cont.substr(i, value_end - i);
         headers.insert({key, value});
 
         if (!validateHeader(key, value))
             setError(BadRequest, "Invalid header");
-        if (value_end == std::string::npos)
+        if (value_end == std::string::npos || i == cont.size())
             break;
+        if (value.size() > MAX_HEADER_LINE)
+            setError(BadRequest, "Header line too long");
+
         i = value_end + 2;
     }
-    if ((getHeaderVal("host")).empty())
-        setError(BadRequest, "Invalid header: missing host");
+    if (http_v == "HTTP/1.1" && getHeaderVal("host").empty())
+        setError(BadRequest, "Missing Host header");
+    if (!getHeaderVal("content-length").empty())
+    {
+        try
+        {
+            long long cl = std::stoll(getHeaderVal("content-length"));
+            if (cl < 0 || cl > MAX_CONT_LEN)
+                setError(PayloadTooLarge, "Invalid Content-Length");
+            content_length = static_cast<size_t>(cl);
+        }
+        catch (std::exception &e)
+        {
+            setError(BadRequest, "Invalid Content-Length");
+        }
+    }
 }
 
-HttpRequest::ParseState HttpRequest::parseChunkedBody(std::string& buffer)
+//size chunk in hex, content chunk, ...
+// no trailer header support
+ParseState HttpRequest::parseChunkedBody(std::string& buffer)
 {
     while (true)
     {
         size_t crlf = buffer.find("\r\n");
         if (crlf == std::string::npos)
             return BODY;
-        //(hex)
-        std::string size_line = buffer.substr(0, crlf);
-        size_t chunk_size = std::stoul(size_line, nullptr, 16);
-        
+
+        std::string size_str = buffer.substr(0, crlf);
+        size_t chunk_size;
+        try
+        {
+            chunk_size = std::stoul(size_str, nullptr, 16);
+        }
+        catch (std::exception &e)
+        {
+            setError(BadRequest, "Invalid chunk size");
+        }
+
         if (chunk_size == 0)
         {
+            // do i need to consume final crlf as well ? || return body?
             buffer.erase(0, crlf + 2);
             return COMPLETE;
         }
-        
         if (buffer.size() < crlf + 2 + chunk_size + 2)
             return BODY;
-        
+        if (buffer[crlf + 2 + chunk_size] != '\r' || buffer[crlf + 2 + chunk_size + 1] != '\n')
+            setError(BadRequest, "malformed chunk");
+
         body.append(buffer, crlf + 2, chunk_size);
         buffer.erase(0, crlf + 2 + chunk_size + 2);
     }
 }
 
-HttpRequest::ParseState HttpRequest::parseRequest(const char* data, size_t len)
+ParseState HttpRequest::parseRequest(const char* data, size_t len)
 {
     buffer.append(data, len);
 
@@ -280,7 +315,6 @@ HttpRequest::ParseState HttpRequest::parseRequest(const char* data, size_t len)
             }
             catch (std::exception& e)
             {
-                state = ERROR;
                 return state;
             }
         }
@@ -298,10 +332,6 @@ HttpRequest::ParseState HttpRequest::parseRequest(const char* data, size_t len)
             {
                 parseHeader(buffer.substr(0, pos));
                 buffer.erase(0, pos + 4);
-                if (!getHeaderVal("content-length").empty())
-                    content_length = std::stoi(getHeaderVal("content-length"));
-                else
-                    content_length = 0;
                 if (content_length == 0 && getHeaderVal("transfer-encoding").find("chunked") == std::string::npos)
                     state = COMPLETE;
                 else
@@ -309,13 +339,12 @@ HttpRequest::ParseState HttpRequest::parseRequest(const char* data, size_t len)
             }
             catch (std::exception &e)
             {
-                state = ERROR;
                 return state;
             } 
         }
         else if (state == BODY) 
         {
-            if (auto search = headers.find("Transfer-Encoding"); search != headers.end() && search->second == "chunked")
+            if (auto search = headers.find("transfer-encoding"); search != headers.end() && search->second == "chunked")
                 state = parseChunkedBody(buffer);
             else if (buffer.size() >= content_length) 
             {

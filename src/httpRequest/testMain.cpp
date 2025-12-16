@@ -10,7 +10,7 @@ std::string testRequest =
     "Host: example.com\r\n"
     "User-Agent: CustomClient/1.0\r\n"
     "Accept: text/html, application/json\r\n"
-    "X-Test-Header:   test value   \r\n"
+    "X-Test-Header:   \r\n"
     "\r\n";
 
 int main()
@@ -19,9 +19,9 @@ int main()
         std::cout << "--- Testing valid request ---\n";
 
         HttpRequest req;
-        HttpRequest::ParseState st = req.parseRequest(testRequest.c_str(), testRequest.size());
+        ParseState st = req.parseRequest(testRequest.c_str(), testRequest.size());
 
-        if (st == HttpRequest::ParseState::COMPLETE)
+        if (st == ParseState::COMPLETE)
             req.printRequest();
         else
             std::cerr << RED << "Parser did not finish: state=" << (int)st << RESET << "\n";
@@ -38,7 +38,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad1.c_str(), bad1.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR: " << std::endl;
             r.printError();
@@ -56,7 +56,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad2.c_str(), bad2.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR: " << std::endl;
             r.printError();
@@ -74,7 +74,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad3.c_str(), bad3.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR: " << std::endl;
             r.printError();
@@ -91,7 +91,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad4.c_str(), bad4.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (missing HTTP version): " << std::endl;
             r.printError();
@@ -108,7 +108,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad5.c_str(), bad5.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (invalid HTTP version): " << std::endl;
             r.printError();
@@ -125,7 +125,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad6.c_str(), bad6.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (missing URI): " << std::endl;
             r.printError();
@@ -142,7 +142,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad7.c_str(), bad7.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (empty request line): " << std::endl;
             r.printError();
@@ -159,7 +159,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad8.c_str(), bad8.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (missing \\r\\n): " << std::endl;
             r.printError();
@@ -176,7 +176,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad9.c_str(), bad9.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (header with no value): " << std::endl;
             r.printError();
@@ -193,7 +193,7 @@ int main()
     {   
         HttpRequest r;
         auto st = r.parseRequest(bad10.c_str(), bad10.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (empty header name): " << std::endl;
             r.printError();
@@ -210,7 +210,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad11.c_str(), bad11.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (multiple spaces): " << std::endl;
             r.printError();
@@ -227,7 +227,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad12.c_str(), bad12.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (invalid method chars): " << std::endl;
             r.printError();
@@ -244,7 +244,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad13.c_str(), bad13.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (missing Host header): " << std::endl;
             r.printError();
@@ -261,7 +261,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad14.c_str(), bad14.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported ERROR (space in header name): " << std::endl;
             r.printError();
@@ -277,7 +277,7 @@ int main()
     {
         HttpRequest r;
         auto st = r.parseRequest(bad15.c_str(), bad15.size());
-        if (st == HttpRequest::ParseState::ERROR)
+        if (st == ParseState::ERROR)
         {
             std::cout << "Parser correctly reported INCOMPLETE (no final \\r\\n\\r\\n): " << std::endl;
             r.printError();

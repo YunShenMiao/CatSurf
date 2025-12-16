@@ -9,6 +9,7 @@
 #define MAX_HEADER_LINE 8000
 #define MAX_REQUEST_LINE 8000
 #define MAX_URI 6000
+#define MAX_CONT_LEN 104857600
 
 enum ErrorCode
 {
@@ -16,6 +17,8 @@ enum ErrorCode
     PayloadTooLarge = 413,
     HTTPVersionNotSupported = 505
 };
+
+enum ParseState {REQUEST_LINE, HEADERS, BODY, COMPLETE, ERROR};
 
 class HttpRequest 
 {
@@ -31,10 +34,9 @@ class HttpRequest
     int error_code;
     std::string error_info;
     bool is_complete;
+    ParseState state;
     
     public:
-    enum ParseState {REQUEST_LINE, HEADERS, BODY, COMPLETE, ERROR};
-    ParseState state;
     //ocf
     HttpRequest();
     HttpRequest(const HttpRequest& other);
@@ -57,7 +59,7 @@ class HttpRequest
     void printError();
 };
 
-bool validateURI(std::string str);
+bool validateURI(std::string& str);
 bool validateHttpV(std::string str);
 bool validateHeader(std::string key, std::string value);
 void skipWhitespace(const std::string& str, size_t& i);
