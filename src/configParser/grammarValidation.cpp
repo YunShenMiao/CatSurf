@@ -1,5 +1,6 @@
 #include "../../include/configParser.hpp"
-
+#include "../../include/utils.hpp"
+//return redirect catsurf.com -> catsurf.de (fast cgi pass) -> 
 const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
 {
     {GLOBAL, 
@@ -107,15 +108,15 @@ bool validateType(Type t, const std::string& value)
     }
 }
 
-bool isMethod(const std::string& str)
+/* bool isMethod(const std::string& str)
 {
     if (str.empty())
         return false;
 
     return str == "GET" || str == "POST" || str == "DELETE";
-}
+} */
 
-bool isDomainname(const std::string& str)
+/* bool isDomainname(const std::string& str)
 {
     if (str.empty() || str.length() > 253 || str.find('/') != std::string::npos)
         return false;
@@ -128,7 +129,7 @@ bool isDomainname(const std::string& str)
     if (str[0] == '.' || str[0] == '-' || str.back() == '.' || str.back() == '-')
         return false;
     return true;
-}
+} */
 
 bool isFilename(const std::string& str)
 {
@@ -138,12 +139,12 @@ bool isFilename(const std::string& str)
     return true;
 }
 
-bool isNumber(const std::string& str)
+/* bool isNumber(const std::string& str)
 {
     if (str.empty())
         return false;
     return (str.find_first_not_of("0123456789") == std::string::npos);
-}
+} */
 
 bool isErrorCode(const std::string& str)
 {
@@ -160,7 +161,7 @@ bool isErrorCode(const std::string& str)
     }
 }
 
-bool isListen(const std::string& str)
+/* bool isListen(const std::string& str)
 {
     size_t colon = str.find(':');
     
@@ -204,7 +205,7 @@ bool isPort(const std::string& str)
     {
         return false;
     }
-}
+} */
 
 bool isPath(const std::string& str)
 {

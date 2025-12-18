@@ -20,8 +20,11 @@ PARSER_SRCS	= testMain.cpp \
 			  parseServer.cpp \
 			  parseLocation.cpp \
 			  print.cpp 
+HTTP_REQUEST_SRCS = testMain.cpp \
+					httpRequest.cpp
+UTILS_SRCS	= utils.cpp
 
-SRCS		= $(addprefix $(SRC_DIR)/configParser/, $(PARSER_SRCS))
+SRCS 		= $(addprefix $(SRC_DIR)/httpRequest/, $(HTTP_REQUEST_SRCS)) $(addprefix $(SRC_DIR)/utils/, $(UTILS_SRCS))
 OBJS		= $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
 DEPS		= $(OBJS:.o=.d)
 # ================================== RULES =================================== #
