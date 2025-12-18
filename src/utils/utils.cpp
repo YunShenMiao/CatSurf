@@ -63,6 +63,7 @@ bool isMethod(const std::string& str)
     return str == "GET" || str == "POST" || str == "DELETE";
 }
 
+// need to check again if it works for config & request now
 bool isDomainname(const std::string& str)
 {
     if (str.empty() || str.length() > 253 || str.find('/') != std::string::npos)
@@ -83,60 +84,49 @@ bool isValidIPv6(const std::string& ip)
     if (ip.empty())
         return false;
 
-    int colonCount = 0;
-    int doubleColonCount = 0;
-    bool lastWasColon = false;
+    int ccount = 0;
+    int dccount = 0;
+    bool lastcol = false;
 
     for (size_t i = 0; i < ip.size(); ++i)
     {
         char c = ip[i];
         if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
-        {
-            lastWasColon = false;
-        }
+            lastcol = false;
         else if (c == ':')
         {
-            if (lastWasColon)
+            if (lastcol)
             {
-                doubleColonCount++;
-                if (doubleColonCount > 1)
-                    return false; // only one '::' allowed
+                dccount++;
+                if (dccount > 1)
+                    return false;
             }
-            colonCount++;
-            lastWasColon = true;
+            ccount++;
+            lastcol = true;
         }
         else
-        {
-            return false; // invalid character
-        }
+            return false;
     }
-
-    return colonCount > 0; // must have at least one colon
+    return ccount > 0;
 }
 
+// eg: [2001:db8::ff00:42:8329]     [::1]    [2001:0db8:0000:0000:0000:ff00:0042:8329]
 bool isIPv6Host(const std::string& host)
 {
-    // Must start with '['
     if (host.empty() || host.front() != '[')
         return false;
-
-    // Find closing bracket
-    size_t closeBracket = host.find(']');
-    if (closeBracket == std::string::npos)
+    size_t close = host.find(']');
+    if (close == std::string::npos)
         return false;
-
-    std::string ip = host.substr(1, closeBracket - 1); // strip brackets
+    std::string ip = host.substr(1, close - 1);
     if (!isValidIPv6(ip))
         return false;
-
-    // Check optional port after closing bracket
-    if (closeBracket + 1 == host.length())
-        return true; // no port, valid
-    else if (host[closeBracket + 1] == ':')
+    if (close + 1 == host.length())
+        return true;
+    else if (host[close + 1] == ':')
     {
-        std::string portStr = host.substr(closeBracket + 2);
+        std::string portStr = host.substr(close + 2);
         return isPort(portStr);
     }
-
-    return false; // invalid character after closing bracket
+    return false;
 }

@@ -65,7 +65,7 @@ class HttpRequest
     const std::string& getMethod() const;
     const std::string& getUri() const;
     const std::string getHeaderVal(const std::string& key) const;
-    parsedRequest& getRequest();
+    parsedRequest getRequest();
 
     //print
     void printRequest();

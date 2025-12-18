@@ -44,6 +44,13 @@ Content-Length. A response that has neither chunked transfer coding nor Content-
 terminated by closure of the connection and, if the header section was received intact, is
 considered complete unless an error was indicated by the underlying connection   p25*/
 
+/*  a server might reject traffic that it deems abusive or characteristic of a denial-of-service
+attack, such as an excessive number of open connections from a single client.
+ */
+
+ // if close from client, also close header in response & then close connection
+ //last activity on recv -> HEADER_TIMEOUT     5–10 seconds BODY_TIMEOUT 10–30 seconds  KEEPALIVE_TIMEOUT  10–60 seconds
+
 
 HttpRequest::HttpRequest (): content_length(0), error_code(0), is_complete(false), state(REQUEST_LINE) {}
 
@@ -90,7 +97,7 @@ const std::string HttpRequest::getHeaderVal(const std::string& key) const
     return "";
 }
 
-parsedRequest& HttpRequest::getRequest()
+parsedRequest HttpRequest::getRequest()
 {
     parsedRequest req;
     req.buffer = buffer;
@@ -415,6 +422,7 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 state = parseChunkedBody(buffer);
             else if (buffer.size() >= content_length) 
             {
+                // should i bad request here if we have more content for security reasons, even if it could be new request?
                 body = buffer.substr(0, content_length);
                 buffer.erase(0, content_length);
                 state = COMPLETE;
