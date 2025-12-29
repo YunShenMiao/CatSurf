@@ -23,7 +23,17 @@ void ConfigParser::setServerDirective(const std::string& key, const std::string&
     if (!validateType(t, value))
         throw std::runtime_error("Invalid value for directive: " + key + " inside Server Block");
     if (key == "listen")
-        serv.listen_port.push_back(value);
+    {
+        if (isPort(value))
+            serv.listen_port.push_back(ListenPort{static_cast<uint16_t>(std::stoi(value)), INADDR_ANY});
+        else
+        {
+            size_t colon = value.find(':');
+            uint16_t port = static_cast<uint16_t>(std::stoi(value.substr(colon + 1)));
+            uint32_t ip = parseIPv4(value.substr(0, colon));
+            serv.listen_port.push_back(ListenPort{port, ip});
+        }
+    }
     else if (key == "root")
         serv.root = value;
     else if (key == "client_max_body_size")

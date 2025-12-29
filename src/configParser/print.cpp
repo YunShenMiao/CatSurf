@@ -75,8 +75,8 @@ void ConfigParser::printServerConfig(const ServerConfig& server, size_t idx) con
     printList(server.index);
     std::cout << std::endl;
     std::cout << std::setw(18) << "listen:";
-    printList(server.listen_port);
-    std::cout << std::endl;
+/*     printList(server.listen_port);
+    std::cout << std::endl; */
 
     std::cout << std::setw(18) << "server_name:";
     printList(server.server_name);

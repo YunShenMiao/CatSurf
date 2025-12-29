@@ -267,3 +267,12 @@ bool isUrl(const std::string& str)
         return str.length() > 7;
     return false;
 }
+
+uint32_t parseIPv4(const std::string& ip_str)
+{
+    uint32_t ip_bin;
+    int ret = inet_pton(AF_INET, ip_str.c_str(), &ip_bin);
+    if (ret != 1)  // ret == 1 on success
+        throw std::runtime_error("Invalid IPv4 address: " + ip_str);
+    return ip_bin; // already in network byte order
+}

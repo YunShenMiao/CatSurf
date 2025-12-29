@@ -13,8 +13,7 @@ INCLUDES	= -I./include
 SRC_DIR		= src
 OBJ_DIR		= obj
 
-PARSER_SRCS	= testMain.cpp \
-			  configParser.cpp \
+PARSER_SRCS	= configParser.cpp \
 			  grammarValidation.cpp \
 			  parseGlobal.cpp \
 			  parseServer.cpp \
@@ -23,8 +22,10 @@ PARSER_SRCS	= testMain.cpp \
 HTTP_REQUEST_SRCS = testMain.cpp \
 					httpRequest.cpp
 UTILS_SRCS	= utils.cpp
+POLLER_SRCS = poller.cpp \
+			  main.cpp
 
-SRCS 		= $(addprefix $(SRC_DIR)/httpRequest/, $(HTTP_REQUEST_SRCS)) $(addprefix $(SRC_DIR)/utils/, $(UTILS_SRCS))
+SRCS 		= $(addprefix $(SRC_DIR)/poller/, $(POLLER_SRCS)) $(addprefix $(SRC_DIR)/configParser/, $(PARSER_SRCS)) $(addprefix $(SRC_DIR)/utils/, $(UTILS_SRCS))
 OBJS		= $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
 DEPS		= $(OBJS:.o=.d)
 # ================================== RULES =================================== #

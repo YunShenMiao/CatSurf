@@ -5,6 +5,8 @@
 #include <map>
 #include <vector>
 #include <iostream>
+#include <arpa/inet.h>
+#include <cstdint>
 
 // need to check for ip:port uniqueness
 
@@ -32,10 +34,16 @@ struct LocationConfig
     std::vector<std::string> allow_methods;
 };
 
+struct ListenPort
+{
+    uint16_t port;
+    uint32_t ip;  
+};
+
 struct ServerConfig
 {
     std::vector<std::string> server_name;
-    std::vector<std::string> listen_port;
+    std::vector<ListenPort> listen_port;
     std::string root;
     int timeout;
     size_t client_max_body_size = 0;
@@ -153,5 +161,6 @@ bool isUrl(const std::string& str);
 bool isTime(const std::string& str);
 bool isRedirect(const std::vector<std::string>& values);
 size_t parseSize(const std::string& str);
+uint32_t parseIPv4(const std::string& ip_str);
 
 #endif
