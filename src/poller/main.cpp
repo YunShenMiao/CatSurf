@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #endif
 
+
 namespace
 {
 
@@ -130,6 +131,7 @@ int main(int argc, char *argv[])
 
     std::unordered_set<int> clients;
     std::unordered_set<int> listen_fd_set(listen_fds.begin(), listen_fds.end());
+    std::unordered_map<int, HttpRequest> requests;
 
     while (true)
     {
@@ -149,6 +151,7 @@ int main(int argc, char *argv[])
             event::set_non_blocking(client_fd);
             poller->add(client_fd, true, false);
             clients.insert(client_fd);
+            requests.emplace(client_fd, HttpRequest());
           }
         }
         else if (event.readable)
@@ -166,11 +169,35 @@ int main(int argc, char *argv[])
             continue;
           }
 
-          // Send response and close
-          send_response(event.fd);
-          poller->remove(event.fd);
-          clients.erase(event.fd);
-          event::close_socket(event.fd);
+      HttpRequest& req = requests[event.fd];
+      ParseState state;
+      //refactor to only return state no error throwing?
+      try
+      {
+        state = req.parseRequest(buffer.data(), bytes);
+      }
+      catch (std::exception &e)
+      {
+        state = ERROR;
+      }
+
+      if (state == COMPLETE)
+      {
+        // handle_request(req); actually dont want to always close
+/*         send_response(event.fd);
+        poller->remove(event.fd);
+        clients.erase(event.fd);
+        requests.erase(event.fd);
+        event::close_socket(event.fd); */
+      }
+    else if (state == ERROR)
+    {
+        // send error response later
+        poller->remove(event.fd);
+        clients.erase(event.fd);
+        requests.erase(event.fd);
+        event::close_socket(event.fd);
+    }
         }
       }
     }

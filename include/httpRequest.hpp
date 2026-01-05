@@ -44,6 +44,7 @@ class HttpRequest
     std::string body;
     size_t content_length;
     int error_code;
+    bool chunked;
     std::string error_info;
     bool is_complete;
     ParseState state;
@@ -73,6 +74,8 @@ class HttpRequest
     // helper
     void clear();
     void check_host();
+    void check_cont_len();
+    void check_transfer_enc();
 };
 
 bool validateURI(std::string& str);

@@ -10,7 +10,7 @@
 #include <system_error>
 #include <unordered_set>
 #include <vector>
-#include "../../include/configParser.hpp"
+#include "configParser.hpp"
 
 #if defined(__linux__)
 #include <sys/epoll.h>

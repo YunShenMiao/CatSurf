@@ -49,7 +49,7 @@ attack, such as an excessive number of open connections from a single client.
  //last activity on recv -> HEADER_TIMEOUT     5–10 seconds BODY_TIMEOUT 10–30 seconds  KEEPALIVE_TIMEOUT  10–60 seconds
 
 
-HttpRequest::HttpRequest (): content_length(0), error_code(0), is_complete(false), state(REQUEST_LINE) {}
+HttpRequest::HttpRequest (): content_length(0), error_code(0), chunked(false), is_complete(false), state(REQUEST_LINE) {}
 
 HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length) , is_complete(other.is_complete), state(other.state) {}
 
@@ -65,7 +65,10 @@ HttpRequest& HttpRequest::operator=(const HttpRequest& other)
         body = other.body;
         content_length = other.content_length;
         is_complete = other.is_complete;
+        chunked = other.chunked;
         state = other.state;
+        error_code = other.error_code;
+        error_info = other.error_info;
     }
     return *this;
 }
@@ -174,6 +177,7 @@ void HttpRequest::clear()
     error_code = 0;
     error_info.clear();
     is_complete = false;
+    chunked = false;
     state = REQUEST_LINE;
 }
 
@@ -234,8 +238,6 @@ void HttpRequest::check_host()
 {
     if (http_v == "HTTP/1.1" && getHeaderVal("host").empty())
         setError(BadRequest, "Missing Host header");
-    if (headers.count("host") > 1)
-        setError(BadRequest, "Multiple Host header");
     if (!getHeaderVal("host").empty())
     {
         std::string val = getHeaderVal("host");
@@ -276,6 +278,28 @@ void HttpRequest::parseSL(std::string cont)
         setError(HTTPVersionNotSupported, "Invalid HTTP version in Request line");
 }
 
+void HttpRequest::check_cont_len()
+{
+    if (!getHeaderVal("content-length").empty())
+    {
+        try
+        {
+            if (!isNumber(getHeaderVal("content-length")))
+                setError(BadRequest, "Invalid Content-Length");
+            long long cl = std::stoll(getHeaderVal("content-length"));
+            if (cl < 0)
+                setError(BadRequest, "Invalid Content-Length");
+            else if (cl > MAX_CONT_LEN)
+                setError(PayloadTooLarge, "Payload too large");
+            content_length = static_cast<size_t>(cl);
+        }
+        catch (std::exception &e)
+        {
+            setError(BadRequest, "Invalid Content-Length");
+        }
+    }
+}
+
 void HttpRequest::parseHeader(std::string cont)
 {
     size_t i = 0;
@@ -287,38 +311,41 @@ void HttpRequest::parseHeader(std::string cont)
         std::string key = str_tolower(cont.substr(i, key_end - i));
         i = key_end + 1;
         skipWhitespace(cont, i);
+        if ((key == "host" && !getHeaderVal("host").empty()) || (key == "content-length" && !getHeaderVal("content-length").empty()))
+            setError(BadRequest, "Multiple Host || Content-length header");
         
         size_t value_end = cont.find("\r\n", i);
         std::string value;
         if (value_end == std::string::npos)
-            value = "";
+            value = cont.substr(i);
         else
             value = cont.substr(i, value_end - i);
+        if ((key.size() + value.size()) > MAX_HEADER_LINE)
+            setError(BadRequest, "Header line too long");
+
         headers.insert({key, value});
 
         if (!validateHeader(key, value))
             setError(BadRequest, "Invalid header");
         if (value_end == std::string::npos || i == cont.size())
             break;
-        if (value.size() > MAX_HEADER_LINE)
-            setError(BadRequest, "Header line too long");
 
         i = value_end + 2;
     }
+    if (!getHeaderVal("content-length").empty() && !getHeaderVal("transfer-encoding").empty())
+        setError(BadRequest, "both header fields 'content-length' & 'transfer-encoding' present");
+    check_transfer_enc();
     check_host();
-    if (!getHeaderVal("content-length").empty())
+    check_cont_len();
+}
+
+void HttpRequest::check_transfer_enc()
+{
+    if (!getHeaderVal("transfer-encoding").empty())
     {
-        try
-        {
-            long long cl = std::stoll(getHeaderVal("content-length"));
-            if (cl < 0 || cl > MAX_CONT_LEN)
-                setError(PayloadTooLarge, "Invalid Content-Length");
-            content_length = static_cast<size_t>(cl);
-        }
-        catch (std::exception &e)
-        {
-            setError(BadRequest, "Invalid Content-Length");
-        }
+        if ((str_tolower(getHeaderVal("transfer-encoding")).find("chunked") == std::string::npos))
+            setError(BadRequest, "Unsupported Transfer-Encoding");
+        else chunked = true;
     }
 }
 
@@ -355,7 +382,8 @@ ParseState HttpRequest::parseChunkedBody(std::string& buffer)
             return BODY;
         if (buffer[crlf + 2 + chunk_size] != '\r' || buffer[crlf + 2 + chunk_size + 1] != '\n')
             setError(BadRequest, "malformed chunk");
-
+        if (body.size() + chunk_size > MAX_CONT_LEN)
+            setError(PayloadTooLarge, "body exceeds maximum size");
         body.append(buffer, crlf + 2, chunk_size);
         buffer.erase(0, crlf + 2 + chunk_size + 2);
     }
@@ -404,7 +432,7 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 parseHeader(buffer.substr(0, pos));
                 buffer.erase(0, pos + 4);
                 // maybe just chunked check and then inside chunked need to see if error or notwith cont len, what had precedence?
-                if (content_length == 0 && getHeaderVal("transfer-encoding").find("chunked") == std::string::npos)
+                if (content_length == 0 && !chunked)
                     state = COMPLETE;
                 else
                     state = BODY;
@@ -416,7 +444,7 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
         }
         else if (state == BODY) 
         {
-            if (auto it = headers.find("transfer-encoding"); it != headers.end() && str_tolower(it->second) == "chunked")
+            if (chunked)
                 state = parseChunkedBody(buffer);
             else if (buffer.size() >= content_length) 
             {
