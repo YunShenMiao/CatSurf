@@ -66,7 +66,7 @@ class Server
     void bind_and_listen(int fd, uint16_t port, uint32_t ip);
 
     void send_response(int client_fd, bool keep_alive);
-    void send_error_response(int client_fd, int status_code);
+    void send_error_response(int client_fd, int status_code, std::string error_info);
 
     const ListenSocket* get_listen_socket(int fd) const;
 

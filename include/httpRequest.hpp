@@ -14,7 +14,9 @@
 enum ErrorCode
 {
     BadRequest = 400,
+    MethodNotAllowed = 405,
     PayloadTooLarge = 413,
+    NotImplemented = 501,
     HTTPVersionNotSupported = 505
 };
 //

@@ -107,7 +107,8 @@ void Server::read_client(int client_fd)
         
         if (!conn.servConf)
         {
-            send_error_response(client_fd, 404);
+            send_error_response(client_fd, 404, "miao");
+            conn.req = HttpRequest();
             close_client(client_fd);
             return;
         }
@@ -117,7 +118,8 @@ void Server::read_client(int client_fd)
     {
         parsedRequest reqi = conn.req.getRequest();
         std::cout << "error: " << reqi.error_info << std::endl;
-        send_error_response(client_fd, reqi.error_code);
+        conn.req = HttpRequest();
+        send_error_response(client_fd, reqi.error_code, reqi.error_info);
         close_client(client_fd);
     }
 }
@@ -204,7 +206,10 @@ void Server::process_request(ClientCon& conn)
         keep_alive = (connection == "keep-alive");
     send_response(conn.fd, keep_alive);
     if (!keep_alive)
+    {
+        conn.req = HttpRequest();
         close_client(conn.fd);
+    }
     else
     {
         conn.req.clear();
@@ -262,10 +267,10 @@ void Server::send_response(int client_fd, bool keep_alive)
     }
 }
     
-void Server::send_error_response(int client_fd, int status_code)
+void Server::send_error_response(int client_fd, int status_code, std::string error_info)
 {
     // server_config->error_pages
-    std::string response = "HTTP/1.1 " + std::to_string(status_code) + " Error\r\nConnection: close\r\n\r\n";
+    std::string response = "HTTP/1.1 " + std::to_string(status_code) + " Error\r\nConnection: close\r\ninfo: " + error_info + "\r\n\r\n";
     event::send_data(client_fd, response.data(), response.size());
 }
 
@@ -296,6 +301,7 @@ void Server::check_timeouts()
         if (now - conn.last_act > timeout)
         {
             std::cout << "Client " << fd << " timed out\n";
+            conn.req = HttpRequest();
             to_close.push_back(fd);
         }
     }

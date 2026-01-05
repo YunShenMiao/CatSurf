@@ -262,7 +262,7 @@ void HttpRequest::parseSL(std::string cont)
         setError(BadRequest, "Invalid Request line");
     method = cont.substr(start, end);
     if (!isMethod(method))
-        setError(BadRequest, "Invalid method in Request line");
+        setError(NotImplemented, "Unsupported HTTP method");
 
     start = end + 1;
     end = cont.find(' ', start);
@@ -343,6 +343,8 @@ void HttpRequest::check_transfer_enc()
 {
     if (!getHeaderVal("transfer-encoding").empty())
     {
+        if (http_v == "HTTP/1.0")
+            setError(NotImplemented, "Transfer-Encoding not supported in HTTP/1.0");
         if ((str_tolower(getHeaderVal("transfer-encoding")).find("chunked") == std::string::npos))
             setError(BadRequest, "Unsupported Transfer-Encoding");
         else chunked = true;
@@ -389,6 +391,7 @@ ParseState HttpRequest::parseChunkedBody(std::string& buffer)
     }
 }
 
+//decided to reject GET & DELETE wqíth body 
 // need to add checks for payload too large, uri too long, request header fields too large
 ParseState HttpRequest::parseRequest(const char* data, size_t len)
 {
@@ -435,7 +438,12 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 if (content_length == 0 && !chunked)
                     state = COMPLETE;
                 else
-                    state = BODY;
+                {
+                    if (method != "POST")
+                        setError(BadRequest, "method shouldn't contain Body");
+                    else
+                        state = BODY;
+                }
             }
             catch (std::exception &e)
             {
@@ -455,5 +463,5 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
             return state;
         }
     }
-    return COMPLETE;
+    return state;
 }
