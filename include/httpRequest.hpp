@@ -4,21 +4,13 @@
 #include <string>
 #include <map>
 #include <optional>
+#include "statusCodes.hpp"
 
 #define MAX_HEADER_SIZE 64000
 #define MAX_HEADER_LINE 8000
 #define MAX_REQUEST_LINE 8000
 #define MAX_URI 6000
 #define MAX_CONT_LEN 104857600
-
-enum ErrorCode
-{
-    BadRequest = 400,
-    MethodNotAllowed = 405,
-    PayloadTooLarge = 413,
-    NotImplemented = 501,
-    HTTPVersionNotSupported = 505
-};
 
 enum ParseState {REQUEST_LINE, HEADERS, BODY, COMPLETE, ERROR};
 
@@ -80,7 +72,10 @@ class HttpRequest
     void check_transfer_enc();
 };
 
-bool validateURI(std::string& str);
+bool validateEncodedURI(const std::string& str);
+std::string decodeURI(const std::string& str);
+bool validateDecodedURI(const std::string& str);
+
 bool validateHttpV(std::string str);
 bool validateHeader(std::string key, std::string value);
 void skipWhitespace(const std::string& str, size_t& i);

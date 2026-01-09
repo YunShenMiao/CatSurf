@@ -4,8 +4,6 @@
 #include <string>
 #include <map>
 #include <vector>
-#include <iostream>
-#include <arpa/inet.h>
 #include <cstdint>
 
 // need to check for ip:port uniqueness

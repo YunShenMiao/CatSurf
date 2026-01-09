@@ -1,5 +1,6 @@
 #include "../include/configParser.hpp"
 #include "../include/server.hpp"
+#include <iostream>
 
 int main(int argc, char* argv[])
 {

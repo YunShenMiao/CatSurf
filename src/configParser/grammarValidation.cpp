@@ -1,3 +1,8 @@
+#include <ostream>
+#include <iostream>
+#include <stdexcept>
+#include <arpa/inet.h>
+
 #include "../../include/configParser.hpp"
 #include "../../include/utils.hpp"
 //return redirect catsurf.com -> catsurf.de (fast cgi pass) -> 
@@ -67,9 +72,7 @@ bool validateType(Type t, const std::vector<std::string>& value)
         case CGI_EXT:
             for (size_t i = 0; i < value.size(); i++)
             {
-                if (value[i][0] != '.')
-                    return false;
-                if (!isFilename(value[i].substr(1)))
+                if (value[i] != ".py" && value[i] != ".php" && value[i] != ".sh")
                     return false;
             }
                 return true;
@@ -250,9 +253,8 @@ bool isRedirect(const std::vector<std::string>& values)
     try
     {
         int code = std::stoi(values[0]);
-/*         return code == 301 || code == 302 || code == 303 || 
-               code == 307 || code == 308; */
-            return code >= 100 && code <= 599;
+        return code == 301 || code == 302 || code == 303 || 
+               code == 307 || code == 308;
     }
     catch (const std::exception&)
     {

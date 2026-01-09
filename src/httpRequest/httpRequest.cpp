@@ -186,14 +186,15 @@ void HttpRequest::clear()
 /***********************************************************/
 
 // maybe no \\?
-bool validateURI(std::string& str)
+
+bool validateEncodedURI(const std::string& str)
 {
     if (str.empty() || str.size() > MAX_URI)
         return false;
     if (str[0] != '/')
         return false;
 
-    std::string allowed = "-._~/?#&=:@!$\\()*+,;%";
+    std::string allowed = "-._~/?#&=:@!$()*+,;%";
     for (size_t i = 0; i < str.size(); i++)
     {
         if (!isalnum(static_cast<unsigned char>(str[i])) && allowed.find(str[i]) == std::string::npos)
@@ -208,6 +209,42 @@ bool validateURI(std::string& str)
     } 
     return true;
 }
+
+std::string decodeURI(const std::string& str)
+{
+    std::string res;
+    res.reserve(str.size());
+
+    for (size_t i = 0; i < str.size(); ++i)
+    {
+        if (str[i] == '%')
+        {
+            char hex[3] = {str[i + 1], str[i + 2], '\0'};
+            char c = static_cast<char>(std::strtol(hex, NULL, 16));
+            if (c == '\0')
+                throw std::runtime_error("null byte");
+            res += c;
+            i += 2;
+        }
+        else
+            res += str[i];
+    }
+    return res;
+}
+
+bool validateDecodedURI(const std::string& str)
+{
+    for (size_t i = 0; i < str.size(); ++i)
+    {
+        unsigned char c = static_cast<unsigned char>(str[i]);
+        if (c < 0x20 || c == 0x7F)
+            return false;
+        if (c == '\\')
+            return false;
+    }
+    return true;
+}
+
 
 bool validateHttpV(std::string str)
 {
@@ -269,9 +306,18 @@ void HttpRequest::parseSL(std::string cont)
     if (end == std::string::npos)
         setError(BadRequest, "Invalid Request line");
     uri = cont.substr(start, end - start);
-    if (!validateURI(uri))
-        setError(BadRequest, "Invalid URI in Request line"); 
-    
+    if (!validateEncodedURI(uri))
+        setError(BadRequest, "Invalid URI in Request line");
+    try
+    {
+        uri = decodeURI(uri);
+    }
+    catch (std::exception &e)
+    {
+        setError(BadRequest, "Invalid URI in Request line");
+    }
+    if (!validateDecodedURI(uri))
+        setError(BadRequest, "Invalid URI in Request line");
     start = end + 1;
     http_v = cont.substr(start);
     if (!validateHttpV(http_v))

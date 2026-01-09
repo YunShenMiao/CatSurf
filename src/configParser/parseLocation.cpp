@@ -1,5 +1,6 @@
 #include "../../include/configParser.hpp"
 #include <set>
+#include <stdexcept>
 
 void ConfigParser::setLocationDefaults(ServerConfig& serv)
 {

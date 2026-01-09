@@ -1,7 +1,10 @@
-#include "../../include/configParser.hpp"
+
 #include <fstream>
 #include <sstream>
+#include <iostream>
 #include <algorithm>
+
+#include "../../include/configParser.hpp"
 
 /***********************************************************/
 /*               CONSTRUCTOR & DESTRUCTOR                  */

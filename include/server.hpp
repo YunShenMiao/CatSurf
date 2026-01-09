@@ -1,22 +1,15 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
-#include <vector>
-#include "configParser.hpp"
-#include "poller.h"
-#include "httpRequest.hpp"
-
 #include <array>
-#include <iostream>
 #include <string>
 #include <unordered_set>
 #include <unordered_map>
+#include <vector>
 
-#ifndef _WIN32
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#endif
+#include "configParser.hpp"
+#include "poller.h"
+#include "httpRequest.hpp"
 
 /* IPv4 = AF_INET (domain)
 TCP = SOCK_STREAM (type)
@@ -33,7 +26,7 @@ struct ClientCon
     HttpRequest req;
     const ServerConfig *servConf;
 
-    ClientCon(int fd, int ip, int port, time_t last_act): fd(fd), ip(ip), port(port), last_act(last_act), req() {}
+    ClientCon(int fd, uint32_t ip, uint16_t port, time_t last_act): fd(fd), ip(ip), port(port), last_act(last_act), req() {}
 };
 
 struct ListenSocket
@@ -57,7 +50,6 @@ class Server
     void new_connection(int listen_fd);
     void read_client(int client_fd);
     const ServerConfig* findServer(uint32_t ip, uint16_t port, const std::string& host_header);
-    const LocationConfig* findLocation(const ServerConfig* server, const std::string& uri);
     void process_request(ClientCon& conn);
     void close_client(int client_fd);
     void check_timeouts();

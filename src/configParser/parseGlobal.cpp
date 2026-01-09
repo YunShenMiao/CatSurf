@@ -1,4 +1,6 @@
 #include "../../include/configParser.hpp"
+
+#include <stdexcept>
 #include <thread>
 #include <set>
 

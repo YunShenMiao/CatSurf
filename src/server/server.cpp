@@ -1,5 +1,12 @@
-#include "../../include/server.hpp"
+
 #include <ctime>
+#include <iostream>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+#include "../../include/server.hpp"
+#include "../../include/router.hpp"
 
 Server::Server(ConfigParser &config): config(config), poller(event::make_poller()) {}
 
@@ -168,35 +175,11 @@ const ListenSocket* Server::get_listen_socket(int fd) const
     return nullptr;
 }
 
-const LocationConfig* Server::findLocation(const ServerConfig* server, const std::string& uri)
-{
-	if (!server || server->locations.empty())
-    	return nullptr;
-  
-  	const LocationConfig* best_match = nullptr;
-  	size_t best_match_len = 0;
-  
-  	for (const auto& loc : server->locations)
-  	{
-    // Check if URI starts with location path
-    	if (uri.find(loc.path) == 0)
-    	{
-      		size_t match_len = loc.path.length();
-      		if (match_len > best_match_len)
-      		{
-        		best_match = &loc;
-        		best_match_len = match_len;
-      		}
-    	}
-  	}
-  	return best_match;
-}
-
 void Server::process_request(ClientCon& conn)
 {
-    // conn.req - conn.servconf Route to correct location
-    // simple response:
-    /* LocationConfig *loc = findLocation(conn.servconf, conn.req.getRequest().uri); */
+    Router r(*conn.servConf, conn.req.getRequest());
+    Route routy = r.route();
+    std::cout << "status: " << routy.status << "\n";
 
     bool keep_alive;
     std::string connection = conn.req.getHeaderVal("Connection");
@@ -204,6 +187,7 @@ void Server::process_request(ClientCon& conn)
         keep_alive = (connection != "close");
     else if (conn.req.getRequest().http_v == "HTTP/1.0")
         keep_alive = (connection == "keep-alive");
+    //create response object(route, servConf, req);
     send_response(conn.fd, keep_alive);
     if (!keep_alive)
     {

@@ -1,6 +1,8 @@
 
 #include "../../include/configParser.hpp"
 #include <set>
+#include <stdexcept>
+#include <arpa/inet.h>
 
 void ConfigParser::setServerDefaults(ServerConfig &serv)
 {
