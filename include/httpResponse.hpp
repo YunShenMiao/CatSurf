@@ -1,31 +1,27 @@
-class HttpResponse {
-    int status_code;
-    std::string status_message;
-    std::map<std::string, std::string> headers;
-    std::string body;
-    
-    // Convert to raw HTTP string for sending
-    std::string toString() const;
-    
-    // Helper methods
-    static HttpResponse ok(const std::string& body);
-    static HttpResponse error(int code, const std::string& message);
-    static HttpResponse redirect(const std::string& location);
-};
+#ifndef HTTPRESPONSE_HPP
+#define HTTPRESPONSE_HPP
 
-class HttpResponse
+#include <string>
+#include <map>
+
+class HttpResponse 
 {
     private:
-        int status_code;
-        std::map<std::string, std::string> headers;
-        std::string body;
-        std::string buffer;  // For partial sends
-        size_t bytes_sent;
-        
+    int status_code;
+    std::string status_info;
+    std::string http_v;
+    std::map<std::string, std::string> headers;
+    std::string body;
+
     public:
-        void setStatus(int code);
-        void setHeader(const std::string& key, const std::string& val);
-        void setBody(const std::string& content);
-        std::string serialize();  // Generate full response
-        bool sendNonBlocking(int fd);  // Handle partial writes
+    HttpResponse(std::string ka, std::string vers);
+    ~HttpResponse();
+    
+    void setHeader(std::string key, std::string value);
+    void setStatus(int stat);
+    void setBody(std::string b);
+    std::string buildResponse();
+    void send_response(int client_fd);
 };
+
+#endif

@@ -1,6 +1,99 @@
 #include "../../include/utils.hpp"
+#include "../../include/statuscodes.hpp"
 #include <cctype>
 #include <cstdlib>
+#include <fstream>
+#include <sys/stat.h>
+#include <limits.h>
+#include <filesystem>
+#include <ctime>
+
+std::string httpDate()
+{
+    std::time_t now = std::time(NULL);
+
+    std::tm gmt;
+    gmt = *std::gmtime(&now);
+
+    char buffer[64];
+    std::strftime(buffer, sizeof(buffer), "%a, %d %b %Y %H:%M:%S GMT", &gmt);
+
+    return std::string(buffer);
+}
+
+std::string generateErrorPage(int status, std::string info)
+{
+    std::ostringstream html;
+
+    html << "<!DOCTYPE html>\n"
+         << "<html>\n"
+         << "<head><title>"
+         << status << " " << info
+         << "</title></head>\n"
+         << "<body>\n"
+         << "<h1>" << status << " " << info << "</h1>\n"
+         << "<p>Error occurred while processing your request.</p>\n"
+         << "</body>\n"
+         << "</html>\n";
+
+    return html.str();
+}
+
+
+std::string mapStatus(int code)
+{
+    switch (code)
+    {
+        case 200: return "OK";
+        case 201: return "Created";
+        case 204: return "No Content";
+
+        case 301: return "Moved Permanently";
+        case 302: return "Found";
+        case 303: return "See Other";
+
+        case 400: return "Bad Request";
+        case 403: return "Forbidden";
+        case 404: return "Not Found";
+        case 405: return "Method Not Allowed";
+        case 413: return "Payload Too Large";
+
+        case 500: return "Internal Server Error";
+        case 501: return "Not Implemented";
+        case 505: return "HTTP Version Not Supported";
+
+        default:  return "Unknown Status";
+    }
+}
+
+bool isDefaultEP(int status)
+{
+    return status == BadRequest || status == Forbidden || status == NotFound
+            || status == MethodNotAllowed || status ==PayloadTooLarge || status == InternalServerError
+            || status == NotImplemented || status == HTTPVersionNotSupported;
+}
+
+bool isDirectory(const std::string& path)
+{
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0)
+        return false;
+    return S_ISDIR(st.st_mode);
+}
+
+std::string resolveConfigPath(const std::string& path)
+{
+    if (path.empty())
+        return path;
+
+    std::filesystem::path p(path);
+    if (p.is_relative())
+        p = std::filesystem::current_path() / p;
+    p = p.lexically_normal();
+
+    return p.string();
+}
+
 
 bool isNumber(const std::string& str)
 {

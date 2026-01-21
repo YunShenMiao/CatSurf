@@ -9,7 +9,6 @@
 #include "../../include/router.hpp"
 #include "../../include/requestHandler.hpp"
 #include "../../include/httpResponse.hpp"
-#include "../../include/utils.hpp"
 
 Server::Server(ConfigParser &config): config(config), poller(event::make_poller()) {}
 
@@ -44,10 +43,7 @@ void Server::run()
         for (const auto& event : events)
         {
             if (listen_fd_set.count(event.fd) > 0)
-            {
                 new_connection(event.fd);
-                continue;
-            }
             if (event.readable)
                 read_client(event.fd);
             if (event.writable)
@@ -57,49 +53,9 @@ void Server::run()
     }
 }
 
-
-//update(fd, read, write) -> event::update(fd, true, true);
-void Server::client_write(int client_fd)
+void client_write()
 {
-    auto it = clients.find(client_fd);
-    if (it == clients.end())
-        return;
 
-    ClientCon& conn = it->second;
-
-    if (!conn.res_ready || conn.response_out.empty())
-        return;
-
-    int remaining = conn.response_out.size() - conn.sent;
-    if (remaining <= 0)
-        return;
-
-    int written = event::send_data(client_fd, conn.response_out.data() + conn.sent, remaining);
-
-    if (written > 0)
-    {
-        conn.sent += written;
-
-        if (conn.sent == conn.response_out.size())
-        {
-            conn.response_out.clear();
-            conn.sent = 0;
-            conn.res_ready = false;
-
-            if (!conn.keep_alive)
-            {
-                close_client(conn.fd);
-                return;
-            }
-            conn.req.clear();
-            conn.last_act = std::time(nullptr);
-            poller->update(conn.fd, true, false);
-        }
-    }
-    else if (written == 0)
-        return;
-    else
-        close_client(conn.fd);
 }
 
 void Server::new_connection(int listen_fd)
@@ -158,39 +114,22 @@ void Server::read_client(int client_fd)
         
         if (!conn.servConf)
         {
-            fallback_error(conn, 500);
+            send_error_response(client_fd, 404, "miao");
+            conn.req = HttpRequest();
+            close_client(client_fd);
             return;
         }
         process_request(conn);
     }
     else if (state == ERROR)
     {
-        int status = conn.req.getRequest().error_code;
-        if (status <= 0)
-            status = 400;
-        fallback_error(conn, status);
-        return;
+        parsedRequest reqi = conn.req.getRequest();
+        std::cout << "\nerror: " << reqi.error_info << std::endl;
+        conn.req = HttpRequest();
+        send_error_response(client_fd, reqi.error_code, reqi.error_info);
+        close_client(client_fd);
     }
 }
-
-void Server::fallback_error(ClientCon& conn, int status)
-{
-    std::string body = generateErrorPage(status, mapStatus(status));
-
-    conn.response_out =
-        "HTTP/1.1 " + std::to_string(status) + " " + mapStatus(status) + "\r\n"
-        "Date: " + httpDate() + "\r\n"
-        "Server: CatSurf\r\n"
-        "Content-Type: text/html\r\n"
-        "Content-Length: " + std::to_string(body.size()) + "\r\n"
-        "Connection: close\r\n"
-        "\r\n" + body;
-
-    conn.keep_alive = false;
-    conn.res_ready = true;
-    poller->update(conn.fd, false, true);
-}
-
 
 const ServerConfig* Server::findServer(uint32_t ip, uint16_t port, const std::string& host_header)
 {
@@ -242,20 +181,28 @@ void Server::process_request(ClientCon& conn)
     Route routy = r.route();
     parsedRequest req = conn.req.getRequest();
 
+    bool keep_alive;
     std::string connection = conn.req.getHeaderVal("Connection");
     if (req.http_v == "HTTP/1.1")
-        conn.keep_alive = (connection != "close");
+        keep_alive = (connection != "close");
     else if (req.http_v == "HTTP/1.0")
-        conn.keep_alive = (connection == "keep-alive");
-
-    RequestHandler handler(routy, req, *conn.servConf, conn.keep_alive);
+        keep_alive = (connection == "keep-alive");
+    //create response object(route, servConf, req)
+    RequestHandler handler(routy, req, *conn.servConf, keep_alive);
     HttpResponse res = handler.handle();
-    conn.response_out = res.buildResponse();
-    conn.res_ready = true;
+    res.send_response(conn.fd);
 
-    // maybe leave read always open and make sure i can pipeline http requests?
-    poller->update(conn.fd, false, true);
-    conn.last_act = std::time(nullptr);
+    /* send_response(conn.fd, keep_alive); */
+    if (!keep_alive)
+    {
+        conn.req = HttpRequest();
+        close_client(conn.fd);
+    }
+    else
+    {
+        conn.req.clear();
+        conn.last_act = std::time(nullptr);
+    }
 }
 
 int Server::create_and_listen(const ListenPort& lp)
@@ -286,6 +233,43 @@ void Server::bind_and_listen(int fd, uint16_t port, uint32_t ip)
     }
 }
 
+void Server::send_response(int client_fd, bool keep_alive)
+{
+    const std::string body = "Miau Miauu Miauuuu!!!!!\n";
+    std::string response =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/plain\r\n"
+        "Connection: " + std::string(keep_alive ? "keep-alive" : "close") + "\r\n"
+        "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+
+    const char *data = response.data();
+    int remaining = static_cast<int>(response.size());
+
+    while (remaining > 0)
+    {
+      int written = event::send_data(client_fd, data, remaining);
+      if (written <= 0)
+        break;
+      data += written;
+      remaining -= written;
+    }
+}
+    
+void Server::send_error_response(int client_fd, int status_code, std::string error_info)
+{
+    // server_config->error_pages
+    std::string response = "HTTP/1.1 " + std::to_string(status_code) + " Error\r\nConnection: close\r\ninfo: " + error_info + "\r\n\r\n";
+    event::send_data(client_fd, response.data(), response.size());
+}
+
+void Server::close_client(int client_fd)
+{
+    poller->remove(client_fd);
+    clients.erase(client_fd);
+    event::close_socket(client_fd);
+    std::cout << "\nClient " << client_fd << " disconnected\n";
+}
+    
 void Server::check_timeouts()
 {
     time_t now = std::time(nullptr);
@@ -309,12 +293,4 @@ void Server::check_timeouts()
     
     for (int fd : to_close)
         close_client(fd);
-}
-
-void Server::close_client(int client_fd)
-{
-    poller->remove(client_fd);
-    clients.erase(client_fd);
-    event::close_socket(client_fd);
-    std::cout << "\nClient " << client_fd << " disconnected\n";
 }

@@ -1,5 +1,6 @@
 
 #include "../../include/configParser.hpp"
+#include "../../include/utils.hpp"
 #include <set>
 #include <stdexcept>
 #include <arpa/inet.h>
@@ -7,13 +8,13 @@
 void ConfigParser::setServerDefaults(ServerConfig &serv)
 {
     if (serv.root.empty())
-        serv.root = "/var/www/html";
+        serv.root = resolveConfigPath("www");
     if (serv.server_name.empty())
         serv.server_name = {"_"};
     if (serv.index.empty())
         serv.index = {"index.html"};
     if (serv.error_page.empty())
-        serv.error_page = {{404, "/404.html"}, {500, "/50x.html"}};
+        serv.error_page.insert({400, "error_pages/400.html"});
     if (serv.client_max_body_size == 0)
         serv.client_max_body_size = 1024 * 1024;
     if (serv.timeout == 0)
@@ -37,7 +38,7 @@ void ConfigParser::setServerDirective(const std::string& key, const std::string&
         }
     }
     else if (key == "root")
-        serv.root = value;
+        serv.root = resolveConfigPath(value);
     else if (key == "client_max_body_size")
         serv.client_max_body_size = parseSize(value);
     else if (key == "timeout")
@@ -123,8 +124,10 @@ void ConfigParser::parseServer(const std::vector<std::string>& tokens, size_t& i
     i++;
     if (serv.listen_port.empty())
         throw std::runtime_error("Missing required 'listen' directive in server block");
-    
     setServerDefaults(serv);
     setLocationDefaults(serv);
+    if (!isDirectory(serv.root))
+        throw std::runtime_error("Server root must be a directory");
+
     servers.push_back(serv);
 }

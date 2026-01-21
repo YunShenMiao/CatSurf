@@ -51,7 +51,7 @@ attack, such as an excessive number of open connections from a single client.
 
 HttpRequest::HttpRequest (): content_length(0), error_code(0), chunked(false), is_complete(false), state(REQUEST_LINE) {}
 
-HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length) , is_complete(other.is_complete), state(other.state) {}
+HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length), error_code(other.error_code), chunked(other.chunked), error_info(other.error_info), is_complete(other.is_complete), state(other.state) {}
 
 HttpRequest& HttpRequest::operator=(const HttpRequest& other)
 {
@@ -64,10 +64,10 @@ HttpRequest& HttpRequest::operator=(const HttpRequest& other)
         headers = other.headers;
         body = other.body;
         content_length = other.content_length;
+        error_code = other.error_code;
         is_complete = other.is_complete;
         chunked = other.chunked;
         state = other.state;
-        error_code = other.error_code;
         error_info = other.error_info;
     }
     return *this;
@@ -125,7 +125,7 @@ std::string str_tolower(std::string s)
 
 void HttpRequest::printRequest()
 {
-    std::cout << "=== Parsed Request ===\n";
+    std::cout << "\n=== Parsed Request ===\n";
     std::cout << "Method: " << method << "\n";
     std::cout << "URI: " << uri << "\n";
     std::cout << "Version: " << http_v << "\n";
@@ -134,7 +134,7 @@ void HttpRequest::printRequest()
     for (auto it = headers.begin(); it != headers.end(); ++it)
         std::cout << it->first << " => " << it->second << std::endl;
 
-    std::cout << "======================\n";
+    std::cout << "======================\n\n";
 }
 
 void HttpRequest::printError()
@@ -306,6 +306,7 @@ void HttpRequest::parseSL(std::string cont)
     if (end == std::string::npos)
         setError(BadRequest, "Invalid Request line");
     uri = cont.substr(start, end - start);
+
     if (!validateEncodedURI(uri))
         setError(BadRequest, "Invalid URI in Request line");
     try

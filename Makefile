@@ -13,19 +13,23 @@ INCLUDES	= -I./include
 SRC_DIR		= src
 OBJ_DIR		= obj
 
-PARSER_SRCS	= configParser.cpp \
-			  grammarValidation.cpp \
-			  parseGlobal.cpp \
-			  parseServer.cpp \
-			  parseLocation.cpp \
-			  print.cpp 
-HTTP_REQUEST_SRCS = httpRequest.cpp
-SERVER_SRCS = server.cpp
-UTILS_SRCS	= utils.cpp
-POLLER_SRCS = poller.cpp
-MAIN_SRC	= main.cpp
+PARSER_SRCS			=	configParser.cpp \
+			  			grammarValidation.cpp \
+			  			parseGlobal.cpp \
+			  			parseServer.cpp \
+			  			parseLocation.cpp \
+			  			print.cpp 
+HTTP_REQUEST_SRCS	= 	httpRequest.cpp
+HTTP_RESPONSE_SRCS	=	httpResponse.cpp \
+						requesthandler.cpp
 
-SRCS 		= $(addprefix $(SRC_DIR)/poller/, $(POLLER_SRCS)) $(addprefix $(SRC_DIR)/configParser/, $(PARSER_SRCS)) $(addprefix $(SRC_DIR)/utils/, $(UTILS_SRCS)) $(addprefix $(SRC_DIR)/, $(MAIN_SRC)) $(addprefix $(SRC_DIR)/server/, $(SERVER_SRCS)) $(addprefix $(SRC_DIR)/httpRequest/, $(HTTP_REQUEST_SRCS))
+SERVER_SRCS 		=	server.cpp
+UTILS_SRCS			=	utils.cpp
+POLLER_SRCS			=	poller.cpp
+ROUTER_SRCS			=	router.cpp
+MAIN_SRC			=	main.cpp
+
+SRCS 		= $(addprefix $(SRC_DIR)/poller/, $(POLLER_SRCS)) $(addprefix $(SRC_DIR)/configParser/, $(PARSER_SRCS)) $(addprefix $(SRC_DIR)/utils/, $(UTILS_SRCS)) $(addprefix $(SRC_DIR)/, $(MAIN_SRC)) $(addprefix $(SRC_DIR)/server/, $(SERVER_SRCS)) $(addprefix $(SRC_DIR)/httpRequest/, $(HTTP_REQUEST_SRCS)) $(addprefix $(SRC_DIR)/router/, $(ROUTER_SRCS)) $(addprefix $(SRC_DIR)/httpResponse/, $(HTTP_RESPONSE_SRCS))
 OBJS		= $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
 DEPS		= $(OBJS:.o=.d)
 # ================================== RULES =================================== #

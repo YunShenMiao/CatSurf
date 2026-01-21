@@ -1,4 +1,5 @@
 #include "../../include/configParser.hpp"
+#include "../../include/utils.hpp"
 #include <set>
 #include <stdexcept>
 
@@ -11,7 +12,7 @@ void ConfigParser::setLocationDefaults(ServerConfig& serv)
         if (serv.locations[i].index.empty())
             serv.locations[i].index = serv.index;
         if (serv.locations[i].allow_methods.empty())
-            serv.locations[i].allow_methods = {"GET"};
+            serv.locations[i].allow_methods = {"GET", "POST", "DELETE"};
         if (serv.locations[i].client_max_body_size == 0)
             serv.locations[i].client_max_body_size = serv.client_max_body_size;
     }
@@ -22,7 +23,7 @@ void ConfigParser::setLocDirective(const std::string& key, const std::string& va
     if (!validateType(t, value))
         throw std::runtime_error("Invalid value for directive: " + key + " inside Location Block");
     if (key == "root")
-        loc.root = value;
+        loc.root = resolveConfigPath(value);
     else if (key == "autoindex")
     {
         if (value == "on")
@@ -31,9 +32,9 @@ void ConfigParser::setLocDirective(const std::string& key, const std::string& va
     else if (key == "client_max_body_size")
         loc.client_max_body_size = parseSize(value);
     else if (key == "cgi_path")
-        loc.cgi_path = value;
+        loc.cgi_path = resolveConfigPath(value);
     else if (key == "upload_path")
-        loc.upload_path = value;
+        loc.upload_path = resolveConfigPath(value);
 }
 
 void ConfigParser::setLocDirective(const std::string& key, const std::vector<std::string>& value, Type t, LocationConfig& loc)
@@ -110,5 +111,20 @@ void ConfigParser::parseLocation(const std::vector<std::string>& tokens, size_t&
      if (i >= tokens.size() || tokens[i] != "}")
         throw std::runtime_error("Unclosed location block");
     i++;
+    if (!loc.root.empty())
+    {
+        if (!isDirectory(loc.root))
+            throw std::runtime_error("Location root must be a directory");
+    }
+        if (!loc.upload_path.empty())
+    {
+        if (!isDirectory(loc.upload_path))
+            throw std::runtime_error("Upload path must be a directory");
+    }
+    if (!loc.return_.empty())
+    {
+        if (loc.path == loc.return_[1])
+            throw std::runtime_error("Return loop detected");
+    }
     serv.locations.push_back(loc);
 }

@@ -5,11 +5,11 @@
 #include <string>
 #include "statusCodes.hpp"
 #include "configParser.hpp"
+#include "httpRequest.hpp"
 
 // update host and stuff ya
 
 class ServerConfig;
-struct parsedRequest;
 
 enum Resource
 {
@@ -17,6 +17,7 @@ enum Resource
     CGI,
     FILES,
     DIRECTORY_LISTING,
+    UPLOAD,
     ERR
 };
 
@@ -40,7 +41,7 @@ class Router
 {
 	private:
     const ServerConfig &server;
-	const parsedRequest &req;
+	const parsedRequest req;
     Route result;
 
 	const LocationConfig* findLocation(const std::string& uri) const;
@@ -49,7 +50,7 @@ class Router
     std::string mapIndexPath(const std::string& dir, const LocationConfig* loc) const;
 	
 	public:
-    Router(const ServerConfig& server, const parsedRequest& req);
+    Router(const ServerConfig& server, const parsedRequest &req);
     ~Router();
 	Route route();
 };

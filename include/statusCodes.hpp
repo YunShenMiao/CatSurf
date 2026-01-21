@@ -13,4 +13,19 @@ enum ErrorCode
     HTTPVersionNotSupported = 505
 };
 
+enum SuccessCode
+{
+    Ok = 200,
+    Created = 201,
+/*     Accepted = 202, */
+    NoContent = 204
+};
+
+enum RedirectCode
+{
+    MovedPermanently = 301,
+    Found = 302,
+    SeeOther = 303
+};
+
 #endif

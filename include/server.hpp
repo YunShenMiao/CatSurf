@@ -23,10 +23,16 @@ struct ClientCon
     uint32_t ip;
     uint16_t port;
     time_t last_act;
+
     HttpRequest req;
     const ServerConfig *servConf;
 
-    ClientCon(int fd, uint32_t ip, uint16_t port, time_t last_act): fd(fd), ip(ip), port(port), last_act(last_act), req() {}
+    std::string response_out;
+    bool res_ready;
+    bool keep_alive;
+    size_t sent;
+
+    ClientCon(int fd, uint32_t ip, uint16_t port, time_t last_act): fd(fd), ip(ip), port(port), last_act(last_act), req(), res_ready(false), keep_alive(false), sent(0)  {}
 };
 
 struct ListenSocket
@@ -49,10 +55,12 @@ class Server
 
     void new_connection(int listen_fd);
     void read_client(int client_fd);
+    void client_write(int client_fd);
     const ServerConfig* findServer(uint32_t ip, uint16_t port, const std::string& host_header);
     void process_request(ClientCon& conn);
     void close_client(int client_fd);
     void check_timeouts();
+    void fallback_error(ClientCon& conn, int status);
 
     int create_and_listen(const ListenPort& lp);
     void bind_and_listen(int fd, uint16_t port, uint32_t ip);

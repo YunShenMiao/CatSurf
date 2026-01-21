@@ -2,6 +2,7 @@
 #include "../../include/router.hpp"
 #include "../../include/httpRequest.hpp"
 #include "../../include/server.hpp"
+#include <iostream>
 #include <sys/stat.h>
 #include <algorithm>
 
@@ -76,11 +77,10 @@ std::string normalizePath(const std::string& path)
     return result;
 }
 
-
 // match location, check redirect, check allow methods, resolve path -> static | directory listing | cgi
 Route Router::route()
-{
-	const LocationConfig *loc = findLocation(req.uri);
+{    
+    const LocationConfig *loc = findLocation(req.uri);
     result.location = loc;
     if (loc && !loc->return_.empty())
 	{
@@ -94,6 +94,12 @@ Route Router::route()
 		result.type = ERR;
 		result.status = MethodNotAllowed;
 	}
+    else if (loc && (req.method != "GET") && !loc->upload_path.empty())
+    {
+        result.type = UPLOAD;
+        return result;
+    }
+
 	else
 	{
 		std::string safe_uri = normalizePath(req.uri);

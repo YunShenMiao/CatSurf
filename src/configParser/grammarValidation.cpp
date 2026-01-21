@@ -50,7 +50,6 @@ bool validateType(Type t, const std::vector<std::string>& value)
         case METH:
             for (size_t i = 0; i < value.size(); i++)
             {
-                std::cout << isMethod(value[i]) << std::endl;
                 if (!isMethod(value[i]))
                     return false;
             }
@@ -77,11 +76,13 @@ bool validateType(Type t, const std::vector<std::string>& value)
             }
                 return true;
         case MAP:
-            if (value.size() < 2)
+            if (value.size() != 2)
                 return false;
             for (size_t i = 0; i < value.size() - 1; i++)
             {
-                if (!isErrorCode(value[i]))
+                if (!isErrorCode(value[0]))
+                    return false;
+                if (value[1].empty() || value[1].find("..") != std::string::npos || value[1][0] != '/')
                     return false;
             }
             return isPath(value.back());
@@ -138,13 +139,9 @@ bool isPath(const std::string& str)
 {
     if (str.empty())
         return false;
-    if (str[0] == '/')
-        return str.length() > 1;
-    if (str.length() >= 2 && str[0] == '.' && str[1] == '/')
-        return str.length() > 2;
-    if (str.length() >= 3 && str[0] == '.' && str[1] == '.' && str[2] == '/')
-        return str.length() > 3;
-    return false;
+    if (str.find('\0') != std::string::npos)
+        return false;
+    return true;
 }
 
 bool isLocationPath(const std::string& str)
@@ -274,7 +271,7 @@ uint32_t parseIPv4(const std::string& ip_str)
 {
     uint32_t ip_bin;
     int ret = inet_pton(AF_INET, ip_str.c_str(), &ip_bin);
-    if (ret != 1)  // ret == 1 on success
+    if (ret != 1)
         throw std::runtime_error("Invalid IPv4 address: " + ip_str);
-    return ip_bin; // already in network byte order
+    return ip_bin;
 }
