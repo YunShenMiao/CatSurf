@@ -77,7 +77,7 @@ class Server
     Server(const Server& other) = delete;
     Server& operator=(const Server& other) = delete;
     Server(Server&&) = default;
-    Server& operator=(Server&&) = default;
+    Server& operator=(Server&&) = delete;
     ~Server();
 
     void init();

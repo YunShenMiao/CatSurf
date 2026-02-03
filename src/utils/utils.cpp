@@ -1,5 +1,5 @@
 #include "../../include/utils.hpp"
-#include "../../include/statuscodes.hpp"
+#include "../../include/statusCodes.hpp"
 #include <cctype>
 #include <cstdlib>
 #include <fstream>

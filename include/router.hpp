@@ -9,7 +9,7 @@
 
 // update host and stuff ya
 
-class ServerConfig;
+struct ServerConfig;
 
 enum Resource
 {
