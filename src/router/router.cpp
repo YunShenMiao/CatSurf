@@ -117,6 +117,8 @@ Route Router::route()
 		struct stat st;
         if (stat(result.file_path.c_str(), &st) != 0)
         {
+            if (loc && resolveCgiPathInfo(loc, safe_uri))
+                return result;
             result.type = ERR;
             result.status = NotFound;
         }
@@ -137,8 +139,17 @@ Route Router::route()
                     }
                     else
                     {
-                        result.type = CGI;
-                        result.cgi_path = loc->cgi_path;
+                        std::string script_uri = safe_uri;
+                        if (script_uri.empty())
+                            script_uri = "/";
+                        if (script_uri.back() != '/')
+                            script_uri += '/';
+                        size_t basename = index_path.find_last_of('/');
+                        if (basename != std::string::npos)
+                            script_uri += index_path.substr(basename + 1);
+                        else
+                            script_uri += index_path;
+                        finalizeCgiRoute(loc, index_path, script_uri, "");
                     }
                 }
                 else
@@ -170,10 +181,7 @@ Route Router::route()
                     result.status = InternalServerError;
                 }
                 else
-                {
-                    result.type = CGI;
-                    result.cgi_path = loc->cgi_path;
-                }
+                    finalizeCgiRoute(loc, result.file_path, safe_uri, "");
             }
             else
                 result.type = FILES;
@@ -267,4 +275,63 @@ const LocationConfig* Router::findLocation(const std::string& uri) const
     	}
   	}
   	return best_match;
+}
+
+void Router::finalizeCgiRoute(const LocationConfig* loc,
+                              const std::string& script_fs_path,
+                              const std::string& script_uri,
+                              const std::string& path_info)
+{
+    result.type = CGI;
+    result.file_path = script_fs_path;
+    result.script_path = script_fs_path;
+    result.path_info = path_info;
+    if (!script_uri.empty())
+        result.script_name = script_uri;
+    else
+        result.script_name = normalizePath(req.uri);
+    result.cgi_path = (loc ? loc->cgi_path : "");
+}
+
+bool Router::resolveCgiPathInfo(const LocationConfig* loc, const std::string& safe_uri)
+{
+    if (!loc || loc->cgi_extension.empty())
+        return false;
+
+    std::string candidate = safe_uri;
+    std::string path_info;
+
+    while (candidate.size() > 1 && candidate.back() == '/')
+        candidate.erase(candidate.size() - 1);
+
+    while (true)
+    {
+        std::string mapped = mapURI(loc, candidate);
+        if (!mapped.empty())
+        {
+            struct stat st;
+            if (stat(mapped.c_str(), &st) == 0 && S_ISREG(st.st_mode))
+            {
+                if (isCGI(loc, mapped))
+                {
+                    if (loc->cgi_path.empty())
+                    {
+                        result.type = ERR;
+                        result.status = InternalServerError;
+                    }
+                    else
+                        finalizeCgiRoute(loc, mapped, candidate, path_info);
+                    return true;
+                }
+            }
+        }
+
+        size_t slash = candidate.find_last_of('/');
+        if (slash == std::string::npos || slash == 0)
+            break;
+        std::string segment = candidate.substr(slash);
+        path_info.insert(0, segment);
+        candidate = candidate.substr(0, slash);
+    }
+    return false;
 }
