@@ -1,0 +1,8 @@
+------WebKitFormBoundaryFOO198CyDSJ7A7Yw
+Content-Disposition: form-data; name="file"; filename="README.md"
+Content-Type: text/markdown
+
+# cweb_dev
+
+docker-compose run --rm app bash
+------WebKitFormBoundaryFOO198CyDSJ7A7Yw--
