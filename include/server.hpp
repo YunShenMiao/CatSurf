@@ -7,7 +7,9 @@
 #include <unordered_map>
 #include <vector>
 #include <ctime>
+#include <memory>
 
+#include "cgi.hpp"
 #include "configParser.hpp"
 #include "poller.h"
 #include "httpRequest.hpp"
@@ -23,6 +25,8 @@ struct ClientCon
     int fd;
     uint32_t ip;
     uint16_t port;
+    std::string remote_addr;
+    uint16_t remote_port_net;
     time_t last_act = 0;
 
     HttpRequest req;
@@ -32,8 +36,24 @@ struct ClientCon
     bool res_ready;
     bool keep_alive;
     size_t sent;
+    bool cgi_active;
+    bool cgi_force_close;
+    bool close_after_send;
 
-    ClientCon(int fd, uint32_t ip, uint16_t port): fd(fd), ip(ip), port(port), last_act(std::time(NULL)), req(), servConf(nullptr), res_ready(false), keep_alive(false), sent(0)  {}
+    ClientCon(int fd, uint32_t ip, uint16_t port):
+        fd(fd),
+        ip(ip),
+        port(port),
+        remote_port_net(0),
+        last_act(std::time(NULL)),
+        req(),
+        servConf(nullptr),
+        res_ready(false),
+        keep_alive(false),
+        sent(0),
+        cgi_active(false),
+        cgi_force_close(false),
+        close_after_send(false)  {}
 };
 
 struct ListenSocket
@@ -50,6 +70,9 @@ class Server
     private:
     const ConfigParser &config;
     std::unique_ptr<event::EventPoller> poller;
+    std::unique_ptr<CgiManager> cgi_manager;
+    int signal_pipe[2];
+    bool signal_pipe_initialized;
     std::vector<ListenSocket> listen_sockets;
     std::unordered_set<int> listen_fd_set;
     std::unordered_map<int, ClientCon> clients;
@@ -65,11 +88,19 @@ class Server
 
     int create_and_listen(const ListenPort& lp);
     void bind_and_listen(int fd, uint16_t port, uint32_t ip);
+    void setup_signal_pipe();
+    void handle_signal_pipe();
+    void reap_children();
+    void drain_client_backpressure(ClientCon& conn);
+    void capture_peername(int client_fd, ClientCon& conn);
 
     void send_response(int client_fd, bool keep_alive);
     void send_error_response(int client_fd, int status_code, std::string error_info);
 
     const ListenSocket* get_listen_socket(int fd) const;
+    bool dispatch_cgi_event(const event::PollEvent& ev);
+    static void sigchld_handler(int);
+    static Server* active_instance;
 
     // int dom, int typ, int prot, int port, u_long interface, int bl
     public:

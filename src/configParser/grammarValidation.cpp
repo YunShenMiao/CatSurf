@@ -24,6 +24,8 @@ const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
             {"error_page", MAP},
             {"client_max_body_size", SIZE},
             {"timeout", TIME},
+            {"cgi_timeout", TIME},
+            {"cgi_idle_timeout", TIME},
             {"location", BLOCK}
         }
     },
@@ -230,12 +232,43 @@ bool isTime(const std::string& str)
 {
     if (str.empty())
         return false;
-    if (!isNumber(str))
+    std::string numbers = str;
+    std::string suffix;
+    if (str.size() > 2)
+    {
+        std::string tail = str.substr(str.size() - 2);
+        if (tail == "ms" || tail == "MS")
+        {
+            suffix = "ms";
+            numbers = str.substr(0, str.size() - 2);
+        }
+    }
+    if (suffix.empty())
+    {
+        char last = str.back();
+        if (last == 's' || last == 'S' || last == 'm' || last == 'M')
+        {
+            suffix = std::string(1, static_cast<char>(std::tolower(last)));
+            numbers = str.substr(0, str.size() - 1);
+        }
+    }
+    if (numbers.empty() || !isNumber(numbers))
         return false;
     try
     {
-        int x = std::stoi(str);
-        if (x < 1 || x > 86400)
+        size_t base = std::stoul(numbers);
+        size_t multiplier = 1000; // seconds default
+        if (suffix == "ms")
+            multiplier = 1;
+        else if (suffix == "m")
+            multiplier = 60 * 1000;
+        if (base == 0)
+            return false;
+        size_t max_size = std::numeric_limits<size_t>::max() / multiplier;
+        if (base > max_size)
+            return false;
+        // 24h absolute guard (in ms)
+        if (base * multiplier > 86400ULL * 1000ULL)
             return false;
         return true;
     }
@@ -282,4 +315,40 @@ uint32_t parseIPv4(const std::string& ip_str)
     if (ret != 1)
         throw std::runtime_error("Invalid IPv4 address: " + ip_str);
     return ip_bin;
+}
+
+size_t parseTime(const std::string& str)
+{
+    if (!isTime(str))
+        throw std::runtime_error("Invalid time value: " + str);
+
+    std::string numbers = str;
+    std::string suffix;
+    if (str.size() > 2)
+    {
+        std::string tail = str.substr(str.size() - 2);
+        if (tail == "ms" || tail == "MS")
+        {
+            suffix = "ms";
+            numbers = str.substr(0, str.size() - 2);
+        }
+    }
+    if (suffix.empty())
+    {
+        char last = str.back();
+        if (last == 's' || last == 'S' || last == 'm' || last == 'M')
+        {
+            suffix = std::string(1, static_cast<char>(std::tolower(last)));
+            numbers = str.substr(0, str.size() - 1);
+        }
+    }
+
+    size_t base = std::stoul(numbers);
+    size_t multiplier = 1000;
+    if (suffix == "ms")
+        multiplier = 1;
+    else if (suffix == "m")
+        multiplier = 60 * 1000;
+    // default suffix (or 's') already handled via multiplier default
+    return base * multiplier;
 }

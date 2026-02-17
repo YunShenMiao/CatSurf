@@ -18,8 +18,11 @@ class HttpResponse
     ~HttpResponse();
     
     void setHeader(std::string key, std::string value);
+    void removeHeader(const std::string& key);
     void setStatus(int stat);
+    void setStatusText(const std::string& info);
     void setBody(std::string b);
+    void setConnection(const std::string& value);
     std::string buildResponse();
     void send_response(int client_fd);
 };

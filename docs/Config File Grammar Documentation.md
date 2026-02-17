@@ -21,7 +21,9 @@ Maps URLs to filesystem paths |
 serve different sites on same port (virtual host) |
 | error_page defaults | default error pages |
 | client_max_body_size defaults | sets maximum allowed size for client request bodies |
-| timeout defaults | request timeout (request to server should never hang indefinitely) |
+| timeout defaults | request timeout (request to server should never hang indefinitely). Accepts values such as `30`, `15s`, `2m`, `500ms`. |
+| cgi_timeout defaults | Maximum lifetime of a CGI process (per server). Same time syntax as `timeout`. |
+| cgi_idle_timeout defaults | Idle window for CGI stdio activity before cancellation. Same time syntax as `timeout`. |
 | location | block inside server block
 defines config for specific URL paths 
 ”specify rules or conf on a URL/route”
@@ -45,6 +47,17 @@ path to CGI interpreter executable |
 | client_max_body_size
 defaults to server c_m_b_s | eg. allow larger uploads on /upload route |
 | return empty | HTTP redirection (eg 301,302) |
+
+### TIME directive format
+
+Any directive typed as `TIME` accepts either a plain integer (interpreted as seconds) or a number followed by `ms`, `s`, or `m`. Examples:
+
+- `timeout 30;` (30 seconds)
+- `cgi_timeout 45s;`
+- `cgi_idle_timeout 1500ms;`
+- `timeout 2m;`
+
+Values are clamped to a maximum of 24 hours.
 
 EXAMPLE CONFIG FILE
 

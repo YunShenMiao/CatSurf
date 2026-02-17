@@ -1,8 +1,13 @@
 
 #include <iostream>
+#include <stdexcept>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include "../../include/server.hpp"
 #include "../../include/router.hpp"
@@ -10,9 +15,38 @@
 #include "../../include/httpResponse.hpp"
 #include "../../include/utils.hpp"
 
-Server::Server(ConfigParser &config): config(config), poller(event::make_poller()) {}
+Server* Server::active_instance = nullptr;
 
-Server::~Server() {}
+Server::Server(ConfigParser &config):
+    config(config),
+    poller(event::make_poller()),
+    cgi_manager(nullptr),
+    signal_pipe{ -1, -1 },
+    signal_pipe_initialized(false)
+{
+    cgi_manager = std::make_unique<CgiManager>(*poller);
+    active_instance = this;
+}
+
+Server::~Server()
+{
+    if (cgi_manager)
+        cgi_manager->shutdown();
+    if (signal_pipe_initialized)
+    {
+        poller->remove(signal_pipe[0]);
+        close(signal_pipe[0]);
+        close(signal_pipe[1]);
+        signal_pipe_initialized = false;
+        struct sigaction sa{};
+        sa.sa_handler = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGCHLD, &sa, nullptr);
+    }
+    if (active_instance == this)
+        active_instance = nullptr;
+}
 
 void Server::init()
 {
@@ -46,6 +80,7 @@ void Server::init()
             listen_fd_set.insert(fd);
         }
     }
+    setup_signal_pipe();
 }
 
 void Server::run()
@@ -57,6 +92,13 @@ void Server::run()
     
         for (const auto& event : events)
         {
+            if (signal_pipe_initialized && event.fd == signal_pipe[0])
+            {
+                handle_signal_pipe();
+                continue;
+            }
+            if (dispatch_cgi_event(event))
+                continue;
             if (listen_fd_set.count(event.fd) > 0)
             {
                 new_connection(event.fd);
@@ -91,7 +133,18 @@ void Server::client_write(int client_fd)
 
     if (written > 0)
     {
+#ifdef DEBUG
+        std::cout << "[WRITE] fd=" << conn.fd
+                  << " wrote=" << written
+                  << " sent=" << conn.sent + written
+                  << " total=" << conn.response_out.size()
+                  << " cgi=" << conn.cgi_active
+                  << " ka=" << conn.keep_alive
+                  << " close_after=" << conn.close_after_send
+                  << "\n";
+#endif
         conn.sent += written;
+        drain_client_backpressure(conn);
 
         if (conn.sent == conn.response_out.size())
         {
@@ -99,11 +152,34 @@ void Server::client_write(int client_fd)
             conn.sent = 0;
             conn.res_ready = false;
 
-            if (!conn.keep_alive)
+            if (conn.cgi_active)
             {
+#ifdef DEBUG
+                std::cout << "[WRITE] fd=" << conn.fd
+                          << " CGI response complete"
+                          << " close_after=" << conn.close_after_send
+                          << " force_close=" << conn.cgi_force_close
+                          << " ka=" << conn.keep_alive << "\n";
+#endif
+                conn.cgi_active = false;
+                if (conn.close_after_send || conn.cgi_force_close || !conn.keep_alive)
+                {
+                    conn.close_after_send = false;
+                    close_client(conn.fd);
+                    return;
+                }
+                poller->update(conn.fd, true, false);
+                conn.last_act = std::time(nullptr);
+                return;
+            }
+
+            if (conn.close_after_send || !conn.keep_alive)
+            {
+                conn.close_after_send = false;
                 close_client(conn.fd);
                 return;
             }
+            conn.close_after_send = false;
             conn.req.clear();
             conn.last_act = std::time(nullptr);
             poller->update(conn.fd, true, false);
@@ -134,7 +210,9 @@ void Server::new_connection(int listen_fd)
         event::set_non_blocking(client_fd);
         poller->add(client_fd, true, false);
         
-        clients.emplace(client_fd, ClientCon(client_fd, ls->ip, ls->port));
+        auto inserted = clients.emplace(client_fd, ClientCon(client_fd, ls->ip, ls->port));
+        if (inserted.second)
+            capture_peername(client_fd, inserted.first->second);
         #ifdef DEBUG
         std::cout << "\nNew client " << client_fd << " connected to " << ls->port << "\n";
         #endif
@@ -153,9 +231,37 @@ void Server::read_client(int client_fd)
     // Read from client
     std::array<char, 4096> buffer{};
     int bytes = event::receive_data(client_fd, buffer.data(), buffer.size());
-    
+
+#ifdef DEBUG
+    if (bytes > 0)
+    {
+        std::string preview;
+        preview.reserve(static_cast<size_t>(bytes));
+        for (int i = 0; i < bytes; ++i)
+        {
+            char ch = buffer[static_cast<size_t>(i)];
+            if (ch == '\r')
+                preview += "\\r";
+            else if (ch == '\n')
+                preview += "\\n";
+            else if (static_cast<unsigned char>(ch) < 0x20)
+                preview += '.';
+            else
+                preview += ch;
+        }
+        std::cout << "[READ] fd=" << conn.fd
+                  << " bytes=" << bytes
+                  << " data=\"" << preview << "\"\n";
+    }
+#endif
+
     if (bytes <= 0)
     {
+#ifdef DEBUG
+        std::cout << "[READ] fd=" << conn.fd
+                  << " recv=" << bytes
+                  << " -> closing\n";
+#endif
         close_client(client_fd);
         return;
     }
@@ -164,6 +270,12 @@ void Server::read_client(int client_fd)
     {
         ParseState state = conn.req.parseRequest(buffer.data(), bytes);
         bytes = 0;
+#ifdef DEBUG
+        std::cout << "[READ] fd=" << conn.fd
+                  << " state=" << state
+                  << " uri=" << conn.req.getUri()
+                  << "\n";
+#endif
         
         if (state == COMPLETE)
         {
@@ -266,12 +378,38 @@ void Server::process_request(ClientCon& conn)
     else if (req.http_v == "HTTP/1.0")
         conn.keep_alive = connection == "keep-alive";
 
+    if (routy.type == CGI)
+    {
+#ifdef DEBUG
+        std::cout << "[ROUTE] CGI uri=" << req.uri
+                  << " query=" << req.query
+                  << " script=" << routy.script_path
+                  << " path_info=" << routy.path_info << "\n";
+#endif
+        if (!cgi_manager || !cgi_manager->launch(routy, req, conn, *conn.servConf))
+        {
+#ifdef DEBUG
+            std::cout << "[ROUTE] CGI launch failed" << "\n";
+#endif
+            fallback_error(conn, BadGateway);
+            conn.keep_alive = false;
+            return;
+        }
+        conn.last_act = std::time(nullptr);
+        return;
+    }
+
+#ifdef DEBUG
+    std::cout << "[ROUTE] type=" << static_cast<int>(routy.type)
+              << " uri=" << req.uri
+              << " file=" << routy.file_path << "\n";
+#endif
+
     RequestHandler handler(routy, req, *conn.servConf, conn.keep_alive);
     HttpResponse res = handler.handle();
     conn.response_out = res.buildResponse();
     conn.res_ready = true;
 
-    // maybe leave read always open and make sure i can pipeline http requests?
     poller->update(conn.fd, false, true);
     conn.last_act = std::time(nullptr);
 }
@@ -304,6 +442,106 @@ void Server::bind_and_listen(int fd, uint16_t port, uint32_t ip)
     }
 }
 
+void Server::setup_signal_pipe()
+{
+    if (signal_pipe_initialized)
+        return;
+
+    if (pipe(signal_pipe) != 0)
+        throw std::runtime_error("Failed to create signal pipe");
+
+    for (int i = 0; i < 2; ++i)
+    {
+        int flags = fcntl(signal_pipe[i], F_GETFL, 0);
+        if (flags == -1 || fcntl(signal_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1)
+        {
+            close(signal_pipe[0]);
+            close(signal_pipe[1]);
+            throw std::runtime_error("Failed to configure signal pipe");
+        }
+    }
+
+    poller->add(signal_pipe[0], true, false);
+    signal_pipe_initialized = true;
+
+    struct sigaction sa{};
+    sa.sa_handler = Server::sigchld_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    if (sigaction(SIGCHLD, &sa, nullptr) != 0)
+    {
+        poller->remove(signal_pipe[0]);
+        close(signal_pipe[0]);
+        close(signal_pipe[1]);
+        signal_pipe_initialized = false;
+        throw std::runtime_error("Failed to install SIGCHLD handler");
+    }
+}
+
+void Server::sigchld_handler(int)
+{
+    if (!active_instance || !active_instance->signal_pipe_initialized)
+        return;
+    char byte = 1;
+    ssize_t r = write(active_instance->signal_pipe[1], &byte, 1);
+    (void)r;
+}
+
+void Server::handle_signal_pipe()
+{
+    if (!signal_pipe_initialized)
+        return;
+
+    char buffer[64];
+    while (true)
+    {
+        ssize_t n = read(signal_pipe[0], buffer, sizeof(buffer));
+        if (n <= 0)
+            break;
+    }
+    reap_children();
+}
+
+void Server::reap_children()
+{
+    if (!cgi_manager)
+        return;
+
+    int status = 0;
+    pid_t pid;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
+        cgi_manager->handleChildExit(pid, status);
+}
+
+bool Server::dispatch_cgi_event(const event::PollEvent& ev)
+{
+    if (cgi_manager && cgi_manager->handlesFd(ev.fd))
+    {
+        cgi_manager->handleEvent(ev.fd, ev.readable, ev.writable);
+        return true;
+    }
+    return false;
+}
+
+void Server::drain_client_backpressure(ClientCon& conn)
+{
+    if (cgi_manager && conn.cgi_active)
+        cgi_manager->notifyClientWritable(conn.fd);
+}
+
+void Server::capture_peername(int client_fd, ClientCon& conn)
+{
+    sockaddr_in addr{};
+    socklen_t len = sizeof(addr);
+    if (getpeername(client_fd, reinterpret_cast<sockaddr*>(&addr), &len) == 0)
+    {
+        char buf[INET_ADDRSTRLEN];
+        if (inet_ntop(AF_INET, &addr.sin_addr, buf, sizeof(buf)))
+            conn.remote_addr = buf;
+        conn.remote_port_net = addr.sin_port;
+    }
+}
+
 void Server::check_timeouts()
 {
     time_t now = std::time(nullptr);
@@ -327,10 +565,15 @@ void Server::check_timeouts()
     
     for (int fd : to_close)
         close_client(fd);
+
+    if (cgi_manager)
+        cgi_manager->checkTimeouts(now);
 }
 
 void Server::close_client(int client_fd)
 {
+    if (cgi_manager)
+        cgi_manager->handleClientClose(client_fd);
     poller->remove(client_fd);
     clients.erase(client_fd);
     event::close_socket(client_fd);

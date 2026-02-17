@@ -26,15 +26,30 @@ void HttpResponse::setHeader(std::string key, std::string value)
         headers.insert({key, value});
 }
 
+void HttpResponse::removeHeader(const std::string& key)
+{
+    headers.erase(key);
+}
+
 void HttpResponse::setStatus(int stat)
 {
     status_code = stat;
     status_info = mapStatus(stat);
 }
 
+void HttpResponse::setStatusText(const std::string& text)
+{
+    status_info = text;
+}
+
 void HttpResponse::setBody(std::string b)
 {
     body = b;
+}
+
+void HttpResponse::setConnection(const std::string& value)
+{
+    setHeader("Connection", value);
 }
 
 std::string HttpResponse::buildResponse()

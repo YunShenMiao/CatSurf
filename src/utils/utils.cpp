@@ -107,6 +107,8 @@ std::string mapStatus(int code)
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
         case 413: return "Payload Too Large";
+        case 502: return "Bad Gateway";
+        case 504: return "Gateway Timeout";
 
         case 500: return "Internal Server Error";
         case 501: return "Not Implemented";
@@ -120,7 +122,8 @@ bool isDefaultEP(int status)
 {
     return status == BadRequest || status == Forbidden || status == NotFound
             || status == MethodNotAllowed || status ==PayloadTooLarge || status == InternalServerError
-            || status == NotImplemented || status == HTTPVersionNotSupported;
+            || status == NotImplemented || status == BadGateway || status == GatewayTimeout
+            || status == HTTPVersionNotSupported;
 }
 
 bool isDirectory(const std::string& path)

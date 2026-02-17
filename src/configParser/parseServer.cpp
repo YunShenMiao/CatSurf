@@ -26,7 +26,16 @@ void ConfigParser::setServerDirective(const std::string& key, const std::string&
     else if (key == "client_max_body_size")
         serv.client_max_body_size = parseSize(value);
     else if (key == "timeout")
-        serv.timeout = stoi(value);
+    {
+        size_t duration = parseTime(value);
+        if (duration < 1000)
+            duration = 1000;
+        serv.timeout = static_cast<int>(duration / 1000);
+    }
+    else if (key == "cgi_timeout")
+        serv.cgi_timeout = parseTime(value);
+    else if (key == "cgi_idle_timeout")
+        serv.cgi_idle_timeout = parseTime(value);
 }
 
 void ConfigParser::setServerDirective(const std::string& key, const std::vector<std::string>& value, Type t, ServerConfig& serv)

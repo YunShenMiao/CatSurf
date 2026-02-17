@@ -12,6 +12,8 @@ enum ErrorCode
     PayloadTooLarge = 413,
     InternalServerError = 500,
     NotImplemented = 501,
+    BadGateway = 502,
+    GatewayTimeout = 504,
     HTTPVersionNotSupported = 505
 };
 

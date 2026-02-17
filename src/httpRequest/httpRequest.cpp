@@ -213,10 +213,6 @@ bool HttpRequest::validateEncodedURI(const std::string& str)
             i += 2;
         }
     } 
-    auto it = str.find('?');
-    uri = str.substr(0, it);
-    if (it != std::string::npos)
-        query = str.substr(it + 1);
     return true;
 }
 
@@ -335,15 +331,24 @@ void HttpRequest::parseSL(std::string cont)
     end = cont.find(' ', start);
     if (end == std::string::npos)
         setError(BadRequest, "Invalid Request line");
-    uri = cont.substr(start, end - start);
+    std::string raw_uri = cont.substr(start, end - start);
+    std::string raw_query;
+    size_t qpos = raw_uri.find('?');
+    if (qpos != std::string::npos)
+    {
+        raw_query = raw_uri.substr(qpos + 1);
+        raw_uri = raw_uri.substr(0, qpos);
+    }
 
-    if (!validateEncodedURI(uri))
+    if (!validateEncodedURI(raw_uri))
         setError(BadRequest, "Invalid URI in Request line");
     try
     {
-        uri = decodeURI(uri);
-        if (!query.empty())
-            query = decodeQuery(query);
+        uri = decodeURI(raw_uri);
+        if (!raw_query.empty())
+            query = decodeQuery(raw_query);
+        else
+            query.clear();
     }
     catch (std::exception &e)
     {
@@ -477,6 +482,11 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
 {
     buffer.append(data, len);
 
+#ifdef DEBUG
+    std::cout << "[PARSER] state=" << state
+              << " buffer_size=" << buffer.size() << "\n";
+#endif
+
     while (state != COMPLETE && state != ERROR)
     {
         if (state == REQUEST_LINE) 
@@ -487,16 +497,30 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 return state;
             }
             size_t pos = buffer.find("\r\n");
+#ifdef DEBUG
+            std::cout << "[PARSER] request_line_pos="
+                      << (pos == std::string::npos ? -1 : static_cast<int>(pos))
+                      << "\n";
+#endif
             if (pos == std::string::npos)
                 return state;
             try
             {
                 parseSL(buffer.substr(0, pos));
+#ifdef DEBUG
+                std::cout << "[PARSER] request_line ok method=" << method
+                          << " uri=" << uri
+                          << " http=" << http_v
+                          << " query=" << query << "\n";
+#endif
                 buffer.erase(0, pos + 2);
                 state = HEADERS;
             }
             catch (std::exception& e)
             {
+#ifdef DEBUG
+                std::cout << "[PARSER] request_line exception: " << e.what() << "\n";
+#endif
                 return state;
             }
         }
@@ -508,11 +532,19 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 return state;
             }
             size_t pos = buffer.find("\r\n\r\n");
+#ifdef DEBUG
+            std::cout << "[PARSER] headers_pos="
+                      << (pos == std::string::npos ? -1 : static_cast<int>(pos))
+                      << "\n";
+#endif
             if (pos == std::string::npos)
                 return state;
             try
             {
                 parseHeader(buffer.substr(0, pos));
+#ifdef DEBUG
+                std::cout << "[PARSER] headers ok count=" << headers.size() << "\n";
+#endif
                 buffer.erase(0, pos + 4);
                 // maybe just chunked check and then inside chunked need to see if error or notwith cont len, what had precedence?
                 if (content_length == 0 && !chunked)
@@ -522,6 +554,9 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
             }
             catch (std::exception &e)
             {
+#ifdef DEBUG
+                std::cout << "[PARSER] headers exception: " << e.what() << "\n";
+#endif
                 return state;
             } 
         }

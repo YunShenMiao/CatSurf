@@ -31,6 +31,9 @@ struct Route
     std::string redirect_url;
     std::string cgi_path;
     std::string cgi_ext;
+    std::string script_path;
+    std::string path_info;
+    std::string script_name;
     const LocationConfig* location;
     
     Route() : type(ERR), status(0), location(nullptr) {}
@@ -48,6 +51,11 @@ class Router
     bool isCGI(const LocationConfig* loc, const std::string& file_path);
 	std::string mapURI(const LocationConfig *loc, const std::string &uri);
     std::string mapIndexPath(const std::string& dir, const LocationConfig* loc) const;
+    bool resolveCgiPathInfo(const LocationConfig* loc, const std::string& safe_uri);
+    void finalizeCgiRoute(const LocationConfig* loc,
+                          const std::string& script_fs_path,
+                          const std::string& script_uri,
+                          const std::string& path_info);
 	
 	public:
     Router(const ServerConfig& server, const parsedRequest &req);

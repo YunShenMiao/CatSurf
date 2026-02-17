@@ -31,9 +31,10 @@ SERVER_SRCS 		=	server.cpp
 UTILS_SRCS			=	utils.cpp
 POLLER_SRCS			=	poller.cpp
 ROUTER_SRCS			=	router.cpp
+CGI_SRCS			=	cgiManager.cpp
 MAIN_SRC			=	main.cpp
 
-SRCS 		= $(addprefix $(SRC_DIR)/poller/, $(POLLER_SRCS)) $(addprefix $(SRC_DIR)/configParser/, $(PARSER_SRCS)) $(addprefix $(SRC_DIR)/utils/, $(UTILS_SRCS)) $(addprefix $(SRC_DIR)/, $(MAIN_SRC)) $(addprefix $(SRC_DIR)/server/, $(SERVER_SRCS)) $(addprefix $(SRC_DIR)/httpRequest/, $(HTTP_REQUEST_SRCS)) $(addprefix $(SRC_DIR)/router/, $(ROUTER_SRCS)) $(addprefix $(SRC_DIR)/httpResponse/, $(HTTP_RESPONSE_SRCS))
+SRCS 		= $(addprefix $(SRC_DIR)/poller/, $(POLLER_SRCS)) $(addprefix $(SRC_DIR)/configParser/, $(PARSER_SRCS)) $(addprefix $(SRC_DIR)/utils/, $(UTILS_SRCS)) $(addprefix $(SRC_DIR)/, $(MAIN_SRC)) $(addprefix $(SRC_DIR)/server/, $(SERVER_SRCS)) $(addprefix $(SRC_DIR)/httpRequest/, $(HTTP_REQUEST_SRCS)) $(addprefix $(SRC_DIR)/router/, $(ROUTER_SRCS)) $(addprefix $(SRC_DIR)/httpResponse/, $(HTTP_RESPONSE_SRCS)) $(addprefix $(SRC_DIR)/cgi/, $(CGI_SRCS))
 OBJS		= $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
 DEPS		= $(OBJS:.o=.d)
 # ================================== RULES =================================== #

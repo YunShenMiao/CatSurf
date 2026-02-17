@@ -44,6 +44,8 @@ struct ServerConfig
     std::vector<ListenPort> listen_port;
     std::string root;
     int timeout = 60;
+    size_t cgi_timeout = 30000;
+    size_t cgi_idle_timeout = 5000;
     size_t client_max_body_size = 1024 * 1024;
     std::vector<std::string> index = {"index.html"};
     std::map<int, std::string> error_page = {{400, "error_pages/400.html"}};
@@ -158,6 +160,7 @@ bool isUrl(const std::string& str);
 bool isTime(const std::string& str);
 bool isRedirect(const std::vector<std::string>& values);
 size_t parseSize(const std::string& str);
+size_t parseTime(const std::string& str);
 uint32_t parseIPv4(const std::string& ip_str);
 
 #endif

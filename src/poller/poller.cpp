@@ -90,7 +90,7 @@ namespace event
   {
     if (epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr) == -1)
     {
-      if (errno != ENOENT)
+      if (errno != ENOENT && errno != EBADF)
       {
         throw std::system_error(errno, std::system_category(), system_message("epoll del"));
       }
