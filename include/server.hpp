@@ -36,6 +36,14 @@ struct ClientCon
     bool res_ready;
     bool keep_alive;
     size_t sent;
+
+    int file_fd;
+    bool file_stream_active;
+    size_t file_bytes_remaining;
+    std::array<char, 65536> file_buf;
+    size_t file_buf_len;
+    size_t file_buf_off;
+
     bool cgi_active;
     bool cgi_force_close;
     bool close_after_send;
@@ -51,6 +59,11 @@ struct ClientCon
         res_ready(false),
         keep_alive(false),
         sent(0),
+        file_fd(-1),
+        file_stream_active(false),
+        file_bytes_remaining(0),
+        file_buf_len(0),
+        file_buf_off(0),
         cgi_active(false),
         cgi_force_close(false),
         close_after_send(false)  {}
@@ -85,6 +98,10 @@ class Server
     void close_client(int client_fd);
     void check_timeouts();
     void fallback_error(ClientCon& conn, int status);
+    bool start_static_file_stream(ClientCon& conn, const Route& route, const parsedRequest& req);
+    bool write_static_file_chunk(ClientCon& conn);
+    void reset_static_file_stream(ClientCon& conn);
+    bool finalize_response_write(ClientCon& conn);
 
     int create_and_listen(const ListenPort& lp);
     void bind_and_listen(int fd, uint16_t port, uint32_t ip);

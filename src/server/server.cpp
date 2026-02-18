@@ -1,9 +1,12 @@
 
 #include <iostream>
 #include <stdexcept>
+#include <limits>
+#include <cerrno>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <unistd.h>
@@ -14,6 +17,26 @@
 #include "../../include/requestHandler.hpp"
 #include "../../include/httpResponse.hpp"
 #include "../../include/utils.hpp"
+
+namespace
+{
+int map_static_open_errno_to_status(int err)
+{
+    if (err == ENOENT || err == ENOTDIR)
+        return NotFound;
+    if (err == EACCES)
+        return Forbidden;
+    return InternalServerError;
+}
+
+std::string static_content_type(const std::string& file_path)
+{
+    std::string content_type = getMime(file_path);
+    if (content_type.find("text/") == 0 || content_type == "application/javascript")
+        content_type += "; charset=utf-8";
+    return content_type;
+}
+}
 
 Server* Server::active_instance = nullptr;
 
@@ -122,73 +145,258 @@ void Server::client_write(int client_fd)
 
     ClientCon& conn = it->second;
 
-    if (!conn.res_ready || conn.response_out.empty())
+    if (!conn.res_ready && !conn.file_stream_active)
         return;
 
-    int remaining = conn.response_out.size() - conn.sent;
-    if (remaining <= 0)
-        return;
-
-    int written = event::send_data(client_fd, conn.response_out.data() + conn.sent, remaining);
-
-    if (written > 0)
+    if (!conn.response_out.empty())
     {
-#ifdef DEBUG
-        std::cout << "[WRITE] fd=" << conn.fd
-                  << " wrote=" << written
-                  << " sent=" << conn.sent + written
-                  << " total=" << conn.response_out.size()
-                  << " cgi=" << conn.cgi_active
-                  << " ka=" << conn.keep_alive
-                  << " close_after=" << conn.close_after_send
-                  << "\n";
-#endif
-        conn.sent += written;
-        drain_client_backpressure(conn);
-
-        if (conn.sent == conn.response_out.size())
+        if (conn.sent >= conn.response_out.size())
         {
             conn.response_out.clear();
             conn.sent = 0;
-            conn.res_ready = false;
+        }
+        else
+        {
+            size_t remaining = conn.response_out.size() - conn.sent;
+            int to_send = static_cast<int>(
+                remaining > static_cast<size_t>(std::numeric_limits<int>::max())
+                    ? std::numeric_limits<int>::max()
+                    : remaining);
+            int written = event::send_data(client_fd, conn.response_out.data() + conn.sent, to_send);
 
-            if (conn.cgi_active)
+            if (written > 0)
             {
 #ifdef DEBUG
                 std::cout << "[WRITE] fd=" << conn.fd
-                          << " CGI response complete"
-                          << " close_after=" << conn.close_after_send
-                          << " force_close=" << conn.cgi_force_close
-                          << " ka=" << conn.keep_alive << "\n";
+                        << " wrote=" << written
+                        << " sent=" << conn.sent + static_cast<size_t>(written)
+                        << " total=" << conn.response_out.size()
+                        << " cgi=" << conn.cgi_active
+                        << " file_stream=" << conn.file_stream_active
+                        << " ka=" << conn.keep_alive
+                        << " close_after=" << conn.close_after_send
+                        << "\n";
 #endif
-                conn.cgi_active = false;
-                if (conn.close_after_send || conn.cgi_force_close || !conn.keep_alive)
-                {
-                    conn.close_after_send = false;
-                    close_client(conn.fd);
-                    return;
-                }
-                poller->update(conn.fd, true, false);
+                conn.sent += static_cast<size_t>(written);
                 conn.last_act = std::time(nullptr);
-                return;
-            }
+                drain_client_backpressure(conn);
 
-            if (conn.close_after_send || !conn.keep_alive)
-            {
-                conn.close_after_send = false;
-                close_client(conn.fd);
+                if (conn.sent == conn.response_out.size())
+                {
+                    conn.response_out.clear();
+                    conn.sent = 0;
+                    if (!conn.file_stream_active)
+                        finalize_response_write(conn);
+                }
                 return;
             }
-            conn.close_after_send = false;
-            conn.req.clear();
-            conn.last_act = std::time(nullptr);
-            poller->update(conn.fd, true, false);
+            if (written == 0)
+            {
+                return;
+            }
+            close_client(conn.fd);
+            return;
         }
     }
-    else if (written == 0)
+
+    if (conn.file_stream_active)
+    {
+        write_static_file_chunk(conn);
         return;
-    else
+    }
+
+    if (conn.res_ready)
+        finalize_response_write(conn);
+}
+
+bool Server::start_static_file_stream(ClientCon& conn, const Route& route, const parsedRequest& req)
+{
+    reset_static_file_stream(conn);
+    conn.response_out.clear();
+    conn.sent = 0;
+    conn.res_ready = false;
+    conn.close_after_send = false;
+
+    auto queue_error = [&](int status)
+    {
+        HttpResponse res(conn.keep_alive ? "keep-alive" : "close", req.http_v);
+        std::string body = generateErrorPage(status, mapStatus(status));
+        res.setStatus(status);
+        res.setHeader("Content-Type", "text/html");
+        res.setHeader("Content-Length", std::to_string(body.size()));
+        res.setBody(body);
+        conn.response_out = res.buildResponse();
+        conn.sent = 0;
+        conn.res_ready = true;
+    };
+
+    int open_flags = O_RDONLY;
+#ifdef O_CLOEXEC
+    open_flags |= O_CLOEXEC;
+#endif
+    int fd = open(route.file_path.c_str(), open_flags);
+    if (fd < 0)
+    {
+        queue_error(map_static_open_errno_to_status(errno));
+        return false;
+    }
+
+    struct stat st{};
+    if (fstat(fd, &st) != 0)
+    {
+        int status = (errno == EACCES) ? Forbidden : InternalServerError;
+        close(fd);
+        queue_error(status);
+        return false;
+    }
+    if (!S_ISREG(st.st_mode))
+    {
+        close(fd);
+        queue_error(Forbidden);
+        return false;
+    }
+    if (st.st_size < 0)
+    {
+        close(fd);
+        queue_error(InternalServerError);
+        return false;
+    }
+
+    unsigned long long file_size = static_cast<unsigned long long>(st.st_size);
+    if (file_size > static_cast<unsigned long long>(std::numeric_limits<size_t>::max()))
+    {
+        close(fd);
+        queue_error(InternalServerError);
+        return false;
+    }
+
+    HttpResponse res(conn.keep_alive ? "keep-alive" : "close", req.http_v);
+    res.setStatus(Ok);
+    res.setHeader("Content-Type", static_content_type(route.file_path));
+    res.setHeader("Content-Length", std::to_string(file_size));
+
+    conn.response_out = res.buildResponse();
+    conn.sent = 0;
+    conn.res_ready = true;
+    conn.file_fd = fd;
+    conn.file_stream_active = true;
+    conn.file_bytes_remaining = static_cast<size_t>(file_size);
+    conn.file_buf_len = 0;
+    conn.file_buf_off = 0;
+    return true;
+}
+
+bool Server::write_static_file_chunk(ClientCon& conn)
+{
+    if (!conn.file_stream_active)
+        return finalize_response_write(conn);
+
+    if (conn.file_buf_off >= conn.file_buf_len)
+    {
+        conn.file_buf_off = 0;
+        conn.file_buf_len = 0;
+
+        if (conn.file_bytes_remaining == 0)
+        {
+            reset_static_file_stream(conn);
+            return finalize_response_write(conn);
+        }
+
+        size_t to_read = conn.file_buf.size();
+        if (to_read > conn.file_bytes_remaining)
+            to_read = conn.file_bytes_remaining;
+
+        ssize_t read_bytes;
+        do
+        {
+            read_bytes = read(conn.file_fd, conn.file_buf.data(), to_read);
+        } while (read_bytes < 0 && errno == EINTR);
+
+        if (read_bytes < 0)
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                return true;
+            close_client(conn.fd);
+            return false;
+        }
+        if (read_bytes == 0)
+        {
+            // Header is already out; avoid mismatched content-length by closing hard.
+            close_client(conn.fd);
+            return false;
+        }
+
+        conn.file_buf_len = static_cast<size_t>(read_bytes);
+        conn.file_bytes_remaining -= conn.file_buf_len;
+    }
+
+    size_t pending = conn.file_buf_len - conn.file_buf_off;
+    int written = event::send_data(conn.fd, conn.file_buf.data() + conn.file_buf_off, static_cast<int>(pending));
+    if (written > 0)
+    {
+        conn.file_buf_off += static_cast<size_t>(written);
+        conn.last_act = std::time(nullptr);
+        drain_client_backpressure(conn);
+        if (conn.file_buf_off == conn.file_buf_len && conn.file_bytes_remaining == 0)
+        {
+            reset_static_file_stream(conn);
+            return finalize_response_write(conn);
+        }
+        return true;
+    }
+    if (written == 0)
+        return true;
+    close_client(conn.fd);
+    return false;
+}
+
+void Server::reset_static_file_stream(ClientCon& conn)
+{
+    if (conn.file_fd >= 0)
+        close(conn.file_fd);
+    conn.file_fd = -1;
+    conn.file_stream_active = false;
+    conn.file_bytes_remaining = 0;
+    conn.file_buf_len = 0;
+    conn.file_buf_off = 0;
+}
+
+bool Server::finalize_response_write(ClientCon& conn)
+{
+    conn.res_ready = false;
+
+    if (conn.cgi_active)
+    {
+#ifdef DEBUG
+        std::cout << "[WRITE] fd=" << conn.fd
+                  << " CGI response complete"
+                  << " close_after=" << conn.close_after_send
+                  << " force_close=" << conn.cgi_force_close
+                  << " ka=" << conn.keep_alive << "\n";
+#endif
+        conn.cgi_active = false;
+        if (conn.close_after_send || conn.cgi_force_close || !conn.keep_alive)
+        {
+            conn.close_after_send = false;
+            close_client(conn.fd);
+            return false;
+        }
+        poller->update(conn.fd, true, false);
+        conn.last_act = std::time(nullptr);
+        return true;
+    }
+
+    if (conn.close_after_send || !conn.keep_alive)
+    {
+        conn.close_after_send = false;
         close_client(conn.fd);
+        return false;
+    }
+    conn.close_after_send = false;
+    conn.req.clear();
+    conn.last_act = std::time(nullptr);
+    poller->update(conn.fd, true, false);
+    return true;
 }
 
 void Server::new_connection(int listen_fd)
@@ -377,6 +585,14 @@ void Server::process_request(ClientCon& conn)
         conn.keep_alive = connection != "close";
     else if (req.http_v == "HTTP/1.0")
         conn.keep_alive = connection == "keep-alive";
+
+    if (routy.type == FILES && req.method == "GET")
+    {
+        start_static_file_stream(conn, routy, req);
+        poller->update(conn.fd, false, true);
+        conn.last_act = std::time(nullptr);
+        return;
+    }
 
     if (routy.type == CGI)
     {
@@ -572,10 +788,16 @@ void Server::check_timeouts()
 
 void Server::close_client(int client_fd)
 {
+    auto it = clients.find(client_fd);
+    if (it == clients.end())
+        return;
+
+    reset_static_file_stream(it->second);
+
     if (cgi_manager)
         cgi_manager->handleClientClose(client_fd);
     poller->remove(client_fd);
-    clients.erase(client_fd);
+    clients.erase(it);
     event::close_socket(client_fd);
     #ifdef DEBUG
     std::cout << "\nClient " << client_fd << " disconnected\n";
