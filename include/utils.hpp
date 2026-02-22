@@ -3,6 +3,9 @@
 
 #include <string>
 
+std::string getMime(std::string path);
+std::string getMimeExt(std::string mime);
+std::string getExtUri(std::string uri);
 bool isNumber(const std::string& str);
 bool isListen(const std::string& str);
 bool isValidIP(const std::string& ip);

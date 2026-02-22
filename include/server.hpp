@@ -8,6 +8,7 @@
 #include <vector>
 #include <ctime>
 #include <memory>
+#include <fstream>
 
 #include "cgi.hpp"
 #include "configParser.hpp"
@@ -21,6 +22,24 @@ TCP = SOCK_STREAM (type)
 protocol = 0;
 port -> serverconfig;
 interface -> get listen from configParserbacklog -> hardcode 128? */
+
+enum MPState {MP_BEGIN, MP_BOUNDARY, MP_HEADER, MP_BODY, MP_END, MP_ERROR};
+
+struct MPBody
+{
+    std::string name;
+    std::string filename;
+    std::string content_type;
+    std::string body;
+};
+
+struct MPFile
+{
+    std::string boundary;
+    std::string buffer;
+    int part = 0;
+    std::vector<MPBody> mps;
+};
 
 struct ClientCon
 {
@@ -49,6 +68,16 @@ struct ClientCon
     bool cgi_active;
     bool cgi_force_close;
     bool close_after_send;
+
+    bool upload_active = false;
+    std::ofstream upload_file;
+    bool MPFlag = false;
+    MPFile multipart;
+    MPState multipart_state = MP_BOUNDARY;
+    int MPCount = 0;
+    std::string upload_path;
+    size_t upload_bytes_remaining = 0;
+    bool chunked = false;
 
     ClientCon(int fd, uint32_t ip, uint16_t port):
         fd(fd),
@@ -97,6 +126,11 @@ class Server
 
     void new_connection(int listen_fd);
     void read_client(int client_fd);
+    void parseMultipartHeaders(ClientCon &conn, const std::string &head);
+    void parseMultipart(ClientCon& conn, std::string body);
+    std::string processChunkedBody(ClientCon& conn, std::string buffer, ParseState& state);
+    void uploadComplete(ClientCon& conn);
+    bool uploadFile(ClientCon& conn, const Route& route, const parsedRequest& req);
     void client_write(int client_fd);
     const ServerConfig* findServer(uint32_t ip, uint16_t port, const std::string& host_header);
     void process_request(ClientCon& conn);

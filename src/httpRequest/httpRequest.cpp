@@ -49,9 +49,9 @@ attack, such as an excessive number of open connections from a single client.
  //last activity on recv -> HEADER_TIMEOUT     5–10 seconds BODY_TIMEOUT 10–30 seconds  KEEPALIVE_TIMEOUT  10–60 seconds
 
 
-HttpRequest::HttpRequest (): content_length(0), error_code(0), chunked(false), is_complete(false), state(REQUEST_LINE), mp() {}
+HttpRequest::HttpRequest (): content_length(0), error_code(0), is_complete(false), state(REQUEST_LINE), chunked(false), MPFlag(false){}
 
-HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), query(other.query), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length), error_code(other.error_code), chunked(other.chunked), error_info(other.error_info), is_complete(other.is_complete), state(other.state), mp(other.mp) {}
+HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), query(other.query), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length), error_code(other.error_code), error_info(other.error_info), is_complete(other.is_complete), state(other.state), chunked(other.chunked), MPFlag(other.MPFlag) {}
 
 HttpRequest& HttpRequest::operator=(const HttpRequest& other)
 {
@@ -70,7 +70,9 @@ HttpRequest& HttpRequest::operator=(const HttpRequest& other)
         chunked = other.chunked;
         state = other.state;
         error_info = other.error_info;
-        mp = other.mp;
+        /* mp = other.mp; */
+        MPFlag = other.MPFlag;
+        chunked = other.chunked;
     }
     return *this;
 }
@@ -123,8 +125,9 @@ parsedRequest HttpRequest::getRequest()
     req.error_code = error_code;
     req.error_info = error_info;
     req.content_type = content_type;
-    req.mp = mp;
-    
+    req.chunked = chunked;
+    req.MPFlag = MPFlag;
+
     // Extract User-Agent header for request fingerprinting
     auto ua_it = headers.find("user-agent");
     if (ua_it != headers.end()) {
@@ -449,7 +452,7 @@ void HttpRequest::check_transfer_enc()
 // no trailer header support
 // DO I NEED TO ADD MAX CHUNK SIZE && PARSE CHUNK SIZE? (rfc page 21), how is stoul handling 
 // bad request if chunk size line includes ; (anything thats not valid hex)
-ParseState HttpRequest::parseChunkedBody(std::string& buffer)
+/* ParseState HttpRequest::parseChunkedBody(std::string& buffer)
 {
     while (true)
     {
@@ -483,53 +486,7 @@ ParseState HttpRequest::parseChunkedBody(std::string& buffer)
         body.append(buffer, crlf + 2, chunk_size);
         buffer.erase(0, crlf + 2 + chunk_size + 2);
     }
-}
-
-void HttpRequest::parseMultipartHeaders(std::string head)
-{
-    auto start = head.find("name=\"");
-    auto end = head.find("\"", start + 6);
-    if (start != std::string::npos && end != std::string::npos)
-        mp.name = head.substr(start + 6, end - (start + 6));
-
-    start = head.find("filename=\"");
-    end = head.find("\"", start + 10);
-    if (start != std::string::npos && end != std::string::npos)
-        mp.filename = head.substr(start + 10, end - (start + 10));
-
-    start = head.find("Content-Type: ");
-    end = head.find("\r\n", start + 14);
-    if (start != std::string::npos && end != std::string::npos)
-        mp.content_type = head.substr(start + 14, end - (start + 14));
-}
-
-ParseState HttpRequest::parseMultipart()
-{
-    std::string contType = getHeaderVal("content-type");
-    auto sep = contType.find("=");
-
-    if (sep != std::string::npos)
-    {
-        std::string boundary = contType.substr(sep + 1);
-        if (boundary.front() == '\"' && boundary.back() == '\"')
-            boundary = boundary.substr(1, boundary.size() - 2);
-
-        auto start = body.find(boundary + "\r\n");
-        auto endH = body.find("\r\n\r\n", start);
-        if (start != std::string::npos && endH != std::string::npos)
-        {
-            std::string MPheaders = body.substr(start, endH);
-            parseMultipartHeaders(MPheaders);
-            auto endB = body.find("\r\n--" + boundary + "--");
-            if (endB != std::string::npos)
-            {
-                body = body.substr(endH + 4, endB - (endH + 4));
-                return COMPLETE;
-            }
-        }
-    }
-    return ERROR;
-}
+} */
 
 // decided not to reject GET & DELETE with body
 /*                     if (method != "POST")
@@ -618,7 +575,20 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 return state;
             } 
         }
-        else if (state == BODY) 
+        else if (state == BODY)
+        {
+            if (!content_type.empty() && content_type.find("multipart/form-data") != std::string::npos)
+                MPFlag = true;
+            if (chunked)
+                body = buffer;
+            else
+            {
+                body = buffer.substr(0, content_length);
+                buffer.erase(0, content_length);
+            }
+            return state;
+        }
+/*         else if (state == BODY) 
         {
             if (chunked)
                 state = parseChunkedBody(buffer);
@@ -631,7 +601,7 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
             if (state == COMPLETE && !content_type.empty() && content_type.find("multipart/form-data") != std::string::npos)
                 parseMultipart();
             return state;
-        }
+        } */
     }
     return state;
 }

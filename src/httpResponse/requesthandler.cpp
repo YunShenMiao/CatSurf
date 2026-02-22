@@ -7,7 +7,6 @@
 #include <iostream>
 #include <cstdio>
 
-
 RequestHandler::RequestHandler(const Route &r, const parsedRequest &pr, const ServerConfig &sc, bool keep_alive): r(r), pr(pr), sc(sc) 
 {
     if (keep_alive)
@@ -89,91 +88,6 @@ HttpResponse RequestHandler::handleDirectoryListing()
     return res;
 }
 
-std::string getExtUri(std::string uri)
-{
-
-    auto dot = uri.find_last_of(".");
-    if (dot != std::string::npos)
-        return uri.substr(dot);
-    else
-        return ".bin";
-}
-
-std::string getMimeExt(std::string mime)
-{
-    static std::map<std::string, std::string> mimeExt;
-
-    if (mimeExt.empty())
-    {
-        mimeExt["text/html"]                        = ".html";
-        mimeExt["text/css"]                         = ".css";
-        mimeExt["application/javascript"]           = ".js";
-        mimeExt["text/plain"]                       = ".txt";
-        mimeExt["application/json"]                 = ".json";
-        mimeExt["application/xml"]                  = ".xml";
-        mimeExt["image/png"]                        = ".png";
-        mimeExt["image/jpeg"]                       = ".jpg";
-        mimeExt["image/jpg"]                        = ".jpg";
-        mimeExt["image/gif"]                        = ".gif";
-        mimeExt["image/x-icon"]                     = ".ico";
-        mimeExt["image/svg+xml"]                    = ".svg";
-        mimeExt["application/pdf"]                  = ".pdf";
-        mimeExt["application/msword"]               = ".doc";
-        mimeExt["application/vnd.ms-excel"]         = ".xls";
-        mimeExt["application/vnd.ms-powerpoint"]    = ".ppt";
-        mimeExt["audio/mpeg"]                       = ".mp3";
-        mimeExt["audio/mp3"]                        = ".mp3";
-        mimeExt["audio/wav"]                        = ".wav";
-        mimeExt["audio/mp4"]                        = ".m4a";
-        mimeExt["video/mp4"]                        = ".mp4";
-        mimeExt["video/mpeg"]                       = ".mpeg";
-        mimeExt["video/quicktime"]                  = ".mov";
-        mimeExt["text/markdown"]                    = ".md";
-    }
-    auto it = mimeExt.find(mime);
-    if (it != mimeExt.end())
-        return it->second;
-    else
-        return ".bin";
-}
-
-std::string getMime(std::string path)
-{
-    static std::map<std::string, std::string> mimeTypes;
-
-    if (mimeTypes.empty())
-    {
-        mimeTypes["html"] = "text/html";
-        mimeTypes["htm"]  = "text/html";
-        mimeTypes["css"]  = "text/css";
-        mimeTypes["js"]   = "application/javascript";
-        mimeTypes["txt"]  = "text/plain";
-        mimeTypes["png"]  = "image/png";
-        mimeTypes["jpg"]  = "image/jpeg";
-        mimeTypes["jpeg"] = "image/jpeg";
-        mimeTypes["gif"]  = "image/gif";
-        mimeTypes["ico"]  = "image/x-icon";
-        mimeTypes["svg"]  = "image/svg+xml";
-        mimeTypes["json"] = "application/json";
-        mimeTypes["pdf"]  = "application/pdf";
-        mimeTypes["mpeg"] = "audio/mpeg";
-        mimeTypes["wav"]  = "audio/wav";
-        mimeTypes["m4a"]  = "audio/mp4";
-    }
-
-    size_t dot = path.find_last_of('.');
-    if (dot == std::string::npos)
-        return "application/octet-stream";
-    std::string key = path.substr(dot + 1);
-    std::transform(key.begin(), key.end(), key.begin(), ::tolower);
-
-    auto it = mimeTypes.find(key);
-    if (it != mimeTypes.end())
-        return it->second;
-
-    return "application/octet-stream";
-}
-
 std::string extractFile(std::string filePath)
 {
     size_t sep = filePath.find_last_of("/");
@@ -232,15 +146,15 @@ HttpResponse RequestHandler::serveFile()
     return res;
 }
 
-std::string generateFilename()
+/* std::string generateFilename()
 {
     static size_t count = 0;
     std::ostringstream oss;
     oss << std::time(nullptr) << "_" << count++;
     return oss.str();
-}
+} */
 
-HttpResponse RequestHandler::uploadFile()
+/* HttpResponse RequestHandler::uploadFile()
 {
     if (!r.location || r.location->upload_path.empty())
         return handleError(MethodNotAllowed);
@@ -276,12 +190,12 @@ HttpResponse RequestHandler::uploadFile()
         fullTargetPath += '/' + fileName;
     res.setHeader("Location", fullTargetPath);
     return res;
-}
+} */
 
 HttpResponse RequestHandler::handleFiles()
 {
-    if (r.type == UPLOAD && pr.method == "POST")
-        return uploadFile();
+/*     if (r.type == UPLOAD && pr.method == "POST")
+        return uploadFile(); */
     if (r.type == UPLOAD && pr.method == "DELETE")
         return deleteFile();
     if (!std::filesystem::exists(r.file_path))

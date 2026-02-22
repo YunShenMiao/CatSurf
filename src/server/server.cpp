@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sstream>
 
 #include "../../include/server.hpp"
 #include "../../include/router.hpp"
@@ -429,70 +430,326 @@ void Server::new_connection(int listen_fd)
     }
 }
 
+std::string generateFilename()
+{
+    static size_t count = 0;
+    std::ostringstream oss;
+    oss << std::time(nullptr) << "_" << count++;
+    return oss.str();
+}
+
+void Server::uploadComplete(ClientCon& conn)
+{
+    conn.upload_file.close();
+    conn.upload_active = false;
+    HttpResponse res(conn.keep_alive ? "keep-alive" : "close", conn.req.getRequest().http_v);
+    res.setStatus(Created);
+    res.setHeader("Location", conn.upload_path);
+    conn.response_out = res.buildResponse();
+    conn.res_ready = true;
+    poller->update(conn.fd, false, true);
+}
+
+
+void Server::parseMultipartHeaders(ClientCon &conn, const std::string &head)
+{
+    conn.multipart.mps.push_back(MPBody());
+
+    auto start = head.find("name=\"");
+    auto end = head.find("\"", start + 6);
+    if (start != std::string::npos && end != std::string::npos)
+        conn.multipart.mps[conn.multipart.part -1].name = head.substr(start + 6, end - (start + 6));
+
+    start = head.find("filename=\"");
+    end = head.find("\"", start + 10);
+    if (start != std::string::npos && end != std::string::npos)
+        conn.multipart.mps[conn.multipart.part -1].filename = head.substr(start + 10, end - (start + 10));
+
+    start = head.find("Content-Type: ");
+    end = head.find("\r\n", start + 14);
+    if (start != std::string::npos && end != std::string::npos)
+        conn.multipart.mps[conn.multipart.part -1].content_type = head.substr(start + 14, end - (start + 14));
+}
+
+void Server::parseMultipart(ClientCon& conn, std::string body)
+{
+    conn.multipart.buffer += body;
+    if (conn.multipart_state == MP_BOUNDARY)
+    {
+        conn.multipart_state = MP_HEADER;
+        conn.multipart.part++;
+    }
+    if (conn.multipart_state == MP_HEADER)
+    {
+        auto start = conn.multipart.buffer.find(conn.multipart.boundary + "\r\n");
+        auto endH = conn.multipart.buffer.find("\r\n\r\n", start);
+        if (start != std::string::npos && endH != std::string::npos)
+        {
+            std::string MPheaders = conn.multipart.buffer.substr(start, endH);
+                                        std::cout << conn.multipart.boundary << std::endl;
+            parseMultipartHeaders(conn, MPheaders);
+                            std::cout << conn.multipart.boundary << std::endl;
+            conn.multipart.buffer.erase(0, endH + 4);
+            conn.multipart_state = MP_BODY;
+            std::string fileName = generateFilename();
+            fileName += getMimeExt(conn.multipart.mps[conn.multipart.part -1].content_type);
+            std::cout << fileName << std::endl;
+            conn.upload_path += fileName ;
+            std::cout << conn.upload_path << std::endl;
+            conn.upload_file.open(conn.upload_path, std::ios::binary | std::ios::app);
+            if (!conn.upload_file.is_open())
+            {
+                fallback_error(conn, InternalServerError);
+                conn.multipart_state = MP_ERROR;
+            }
+        }
+        else
+            return;
+    }
+    if (conn.multipart_state == MP_BODY)
+    {
+        std::string delimiter = conn.multipart.boundary;
+        std::string final_delim  = "\r\n--" + delimiter + "--";
+
+        size_t final_pos = conn.multipart.buffer.find(final_delim);
+        if (final_pos != std::string::npos)
+        {
+            conn.upload_file.write(conn.multipart.buffer.data(), final_pos);
+            conn.upload_file.close();
+            conn.multipart_state = MP_END;
+            conn.multipart.buffer.clear();
+            return;
+        }
+
+        size_t pos = conn.multipart.buffer.find(delimiter);
+
+        if (pos != std::string::npos)
+        {
+            conn.upload_file.write(conn.multipart.buffer.data(), pos);
+            conn.multipart.buffer.erase(0, pos + 2);
+            conn.multipart_state = MP_BOUNDARY;
+        }
+
+        size_t guard = delimiter.length();
+        if (conn.multipart.buffer.size() > guard)
+        {
+            size_t safe = conn.multipart.buffer.size() - guard;
+            conn.upload_file.write(conn.multipart.buffer.data(), safe);
+            conn.multipart.buffer.erase(0, safe);
+        }
+
+        return;
+/*         auto endB = conn.multipart.buffer.find("\r\n--" + conn.multipart.boundary + "--");
+        if (endB != std::string::npos)
+        {
+            conn.multipart.buffer = conn.multipart.buffer.substr(endB - 4);
+            return COMPLETE;
+        }
+        else
+        {
+            conn.upload_file.write(conn.multipart.buffer.data(), conn.multipart.buffer.size() - (conn.multipart.boundary.size() + 4));
+            conn.upload_bytes_remaining -= conn.multipart.buffer.size() - (conn.multipart.boundary.size() + 4);
+        } */
+
+    }
+}
+
+bool Server::uploadFile(ClientCon& conn, const Route& route, const parsedRequest& req)
+{
+    if (!route.location || route.location->upload_path.empty())
+        return false;
+
+    if (req.MPFlag)
+    {
+        conn.MPFlag = true;
+        auto sep = req.content_type.find("=");
+
+        if (sep != std::string::npos)
+        {
+            conn.multipart.boundary = req.content_type.substr(sep + 1);
+            if (conn.multipart.boundary.front() == '\"' && conn.multipart.boundary.back() == '\"')
+                conn.multipart.boundary = conn.multipart.boundary.substr(1, conn.multipart.boundary.size() - 2);
+        }
+        else
+            fallback_error(conn, BadRequest);
+    }
+
+    std::string uploadPath = route.location->upload_path;
+    std::cout << uploadPath << std::endl;
+    if (uploadPath.back() != '/')
+        uploadPath += '/';
+    conn.upload_path = uploadPath;
+
+    if (!conn.MPFlag)
+    {
+        std::string fileName = generateFilename();
+        fileName += getExtUri(route.file_path);
+        uploadPath= uploadPath + fileName;
+
+        conn.upload_file.open(uploadPath, std::ios::binary | std::ios::app);
+        if (!conn.upload_file.is_open())
+            return false;
+    }
+
+    conn.upload_bytes_remaining = req.content_length;
+
+    if (!req.body.empty())
+    {
+        if (req.chunked)
+        {
+            conn.chunked = true;
+            ParseState state;
+            std::string processed = processChunkedBody(conn, req.body, state);
+            if (state == ERROR)
+                return false;
+            if (conn.MPFlag)
+                parseMultipart(conn, processed);
+            else
+            {
+                conn.upload_file.write(processed.data(), processed.size());
+                conn.upload_bytes_remaining -= processed.size();
+            }
+            if (state == COMPLETE)
+                uploadComplete(conn);
+        }
+        else
+        {
+            if (conn.MPFlag)
+                parseMultipart(conn, req.body);
+            else
+            {
+                conn.upload_file.write(req.body.data(), req.body.size());
+                conn.upload_bytes_remaining -= req.body.size();
+            }
+        }
+        conn.req.clear();
+    }                
+
+    if (!conn.chunked && conn.upload_bytes_remaining == 0)
+        uploadComplete(conn);
+    else
+        conn.upload_active = true;
+
+    return true;
+}
+
+
+std::string Server::processChunkedBody(ClientCon& conn, std::string buffer, ParseState& state)
+{
+    std::string decoded;
+    state = BODY;
+    
+    size_t crlf = buffer.find("\r\n");
+    if (crlf == std::string::npos)
+        return decoded;
+
+    std::string size_str = buffer.substr(0, crlf);
+    size_t chunk_size;
+    try
+    {
+        chunk_size = std::stoul(size_str, nullptr, 16);
+    }
+    catch (std::exception &e)
+    {
+        fallback_error(conn, BadRequest);
+        state = ERROR;
+        return decoded;
+    }
+    if (chunk_size == 0)
+    {
+    if (buffer.size() < crlf + 4)
+        return decoded;
+    buffer.erase(0, crlf + 4);
+    state = COMPLETE;
+    return decoded;
+    }
+
+    if (buffer.size() < crlf + 2 + chunk_size + 2)
+        return decoded;
+
+/*     if (buffer[crlf + 2 + chunk_size] != '\r' || buffer[crlf + 2 + chunk_size + 1] != '\n')
+        setError(BadRequest, "malformed chunk");
+    if (body.size() + chunk_size > MAX_CONT_LEN)
+        setError(PayloadTooLarge, "body exceeds maximum size"); */
+    decoded.append(buffer, crlf + 2, chunk_size);
+    buffer.erase(0, crlf + 2 + chunk_size + 2);
+    return decoded;
+}
+
+
+
 void Server::read_client(int client_fd)
 {
     auto it = clients.find(client_fd);
     if (it == clients.end())
         return;
-    
     ClientCon& conn = it->second;
     conn.last_act = std::time(nullptr);
-    
-    // Read from client
+
     std::array<char, 4096> buffer{};
     int bytes = event::receive_data(client_fd, buffer.data(), buffer.size());
 
-#ifdef DEBUG
-    if (bytes > 0)
-    {
-        std::string preview;
-        preview.reserve(static_cast<size_t>(bytes));
-        for (int i = 0; i < bytes; ++i)
-        {
-            char ch = buffer[static_cast<size_t>(i)];
-            if (ch == '\r')
-                preview += "\\r";
-            else if (ch == '\n')
-                preview += "\\n";
-            else if (static_cast<unsigned char>(ch) < 0x20)
-                preview += '.';
-            else
-                preview += ch;
-        }
-        std::cout << "[READ] fd=" << conn.fd
-                  << " bytes=" << bytes
-                  << " data=\"" << preview << "\"\n";
-    }
-#endif
-
     if (bytes <= 0)
     {
-#ifdef DEBUG
-        std::cout << "[READ] fd=" << conn.fd
-                  << " recv=" << bytes
-                  << " -> closing\n";
-#endif
+    #ifdef DEBUG
+        std::cout << "[READ] fd=" << conn.fd << " recv=" << bytes << " -> closing\n";
+    #endif
         close_client(client_fd);
         return;
     }
-
-    while (true)
+    size_t to_write = 0;
+    if (conn.upload_active)
     {
-        ParseState state = conn.req.parseRequest(buffer.data(), bytes);
-        bytes = 0;
-#ifdef DEBUG
-        std::cout << "[READ] fd=" << conn.fd
-                  << " state=" << state
-                  << " uri=" << conn.req.getUri()
-                  << "\n";
-#endif
-        
-        if (state == COMPLETE)
+        ParseState state = BODY;
+        if (conn.chunked)
         {
-            #ifdef DEBUG
-            conn.req.printRequest();
-            #endif
+            std::string str(buffer.data(), bytes);
+            std::string processed = processChunkedBody(conn, str, state);
+            if (state == ERROR)
+                return;
+            if (conn.MPFlag)
+                    parseMultipart(conn, processed);
+            else
+            {
+                conn.upload_file.write(processed.data(), processed.size());
+                conn.upload_bytes_remaining -= processed.size();
+            }
+        }
+        else
+        {
+            to_write = std::min(static_cast<size_t>(bytes), conn.upload_bytes_remaining);
+            if (conn.MPFlag)
+                parseMultipart(conn, std::string(buffer.data(), to_write));
+            else
+                conn.upload_file.write(buffer.data(), to_write);
+            conn.upload_bytes_remaining -= to_write;
+        }
+        if (!conn.upload_file)
+        {
+            conn.upload_file.close();
+            unlink(conn.upload_path.c_str());
+            fallback_error(conn, 500);
+            return;
+        }
 
+        if (conn.upload_bytes_remaining == 0 || state == COMPLETE || conn.multipart_state == MP_END)
+            uploadComplete(conn);
+    }
+    if (static_cast<size_t>(bytes) > to_write)
+    {
+        ParseState state = conn.req.parseRequest(buffer.data() + to_write, bytes - to_write);
+        if (state == ERROR)
+        {
+            int status = conn.req.getRequest().error_code;
+            if (status <= 0) status = 400;
+                fallback_error(conn, status);
+            return;
+        }
+
+        if (state == REQUEST_LINE || state == HEADERS)
+            return;
+        if (state == BODY || state == COMPLETE)
+        {
             std::string host = conn.req.getHeaderVal("host");
             conn.servConf = findServer(conn.ip, conn.port, host);
             if (!conn.servConf)
@@ -501,18 +758,16 @@ void Server::read_client(int client_fd)
                 return;
             }
             process_request(conn);
-            conn.req.clear();
-            continue;
+
+            if (state == COMPLETE)
+                conn.req.clear();
+
+            #ifdef DEBUG
+                std::cout << "[READ] fd=" << conn.fd
+              << " state=" << state
+              << " uri=" << conn.req.getUri() << "\n";
+            #endif
         }
-        if (state == ERROR)
-        {
-            int status = conn.req.getRequest().error_code;
-            if (status <= 0)
-                status = 400;
-            fallback_error(conn, status);
-            return;
-        }
-        break;
     }
 }
 
@@ -670,7 +925,6 @@ void Server::process_request(ClientCon& conn)
             std::cout << "[ROUTE] CGI launch failed" << "\n";
 #endif
             fallback_error(conn, BadGateway);
-            conn.keep_alive = false;
             return;
         }
         conn.last_act = std::time(nullptr);
@@ -682,6 +936,13 @@ void Server::process_request(ClientCon& conn)
               << " uri=" << req.uri
               << " file=" << routy.file_path << "\n";
 #endif
+
+    if (routy.type == UPLOAD && req.method == "POST")
+    {
+        uploadFile(conn, routy, req);
+        conn.last_act = std::time(nullptr);
+        return;
+    }
 
     RequestHandler handler(routy, req, *conn.servConf, conn.keep_alive);
     HttpResponse res = handler.handle();
@@ -853,6 +1114,13 @@ void Server::close_client(int client_fd)
     auto it = clients.find(client_fd);
     if (it == clients.end())
         return;
+
+    if (it->second.upload_active)
+    {
+        it->second.upload_file.close();
+        unlink(it->second.upload_path.c_str());
+    }
+
 
     reset_static_file_stream(it->second);
 
