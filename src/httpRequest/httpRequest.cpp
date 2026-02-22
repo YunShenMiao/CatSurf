@@ -124,6 +124,13 @@ parsedRequest HttpRequest::getRequest()
     req.error_info = error_info;
     req.content_type = content_type;
     req.mp = mp;
+    
+    // Extract User-Agent header for request fingerprinting
+    auto ua_it = headers.find("user-agent");
+    if (ua_it != headers.end()) {
+        req.user_agent = ua_it->second;
+    }
+    
     return req;
 }
 

@@ -36,6 +36,7 @@ struct parsedRequest
     int error_code;
     std::string error_info;
     MPBody mp;
+    std::string user_agent;
 };
 
 class HttpRequest 

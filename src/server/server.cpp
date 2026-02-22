@@ -45,7 +45,9 @@ Server::Server(ConfigParser &config):
     poller(event::make_poller()),
     cgi_manager(nullptr),
     signal_pipe{ -1, -1 },
-    signal_pipe_initialized(false)
+    signal_pipe_initialized(false),
+    bot_detection_config(BotDetection::getDefaultConfig()),
+    captcha_bypass()
 {
     cgi_manager = std::make_unique<CgiManager>(*poller);
     active_instance = this;
@@ -576,8 +578,6 @@ const ListenSocket* Server::get_listen_socket(int fd) const
 
 void Server::process_request(ClientCon& conn)
 {
-    Router r(*conn.servConf, conn.req.getRequest());
-    Route routy = r.route();
     parsedRequest req = conn.req.getRequest();
 
     std::string connection = str_tolower(conn.req.getHeaderVal("connection"));
@@ -585,6 +585,68 @@ void Server::process_request(ClientCon& conn)
         conn.keep_alive = connection != "close";
     else if (req.http_v == "HTTP/1.0")
         conn.keep_alive = connection == "keep-alive";
+
+    std::string fingerprint = conn.remote_addr.empty() ? std::to_string(conn.ip) : conn.remote_addr;
+    if (!req.user_agent.empty())
+        fingerprint += "|" + req.user_agent;
+
+    std::string bypass_cookie = captcha_bypass.extractTokenFromCookie(conn.req.getHeaderVal("cookie"));
+    bool has_bypass = captcha_bypass.hasValidBypass(bypass_cookie, fingerprint);
+
+    if (!has_bypass)
+    {
+        BotDetection::BotAnalysis bot_analysis = BotDetection::analyzeAndTrackRequest(
+            fingerprint,
+            req.uri,
+            bot_request_history,
+            bot_detection_config
+        );
+
+        if (bot_analysis.score == BotDetection::BotScore::BLOCKED)
+        {
+            if (captcha_bypass.isSolvedCaptchaPost(req.method, req.uri, req.body))
+            {
+                std::string token = captcha_bypass.createBypass(fingerprint);
+                HttpResponse res(conn.keep_alive ? "keep-alive" : "close", req.http_v);
+                res.setStatus(SeeOther);
+                res.setHeader("Location", "/");
+                res.setHeader("Set-Cookie",
+                              "catsurf_clearance=" + token +
+                              "; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax");
+                res.setHeader("Content-Length", "0");
+                conn.response_out = res.buildResponse();
+                conn.sent = 0;
+                conn.res_ready = true;
+                poller->update(conn.fd, false, true);
+                conn.last_act = std::time(nullptr);
+                return;
+            }
+
+            std::string body = captcha_bypass.buildCaptchaPage();
+            HttpResponse res(conn.keep_alive ? "keep-alive" : "close", req.http_v);
+            res.setStatus(TooManyRequests);
+            res.setHeader("Content-Type", "text/html; charset=utf-8");
+            res.setHeader("Cache-Control", "no-store");
+            res.setHeader("Content-Length", std::to_string(body.size()));
+            res.setHeader("Retry-After", std::to_string(bot_detection_config.block_duration_seconds));
+            res.setBody(body);
+
+            conn.response_out = res.buildResponse();
+            conn.sent = 0;
+            conn.res_ready = true;
+            poller->update(conn.fd, false, true);
+            conn.last_act = std::time(nullptr);
+#ifdef DEBUG
+            std::cout << "[BOT] blocked fp=" << fingerprint
+                      << " rpm=" << bot_analysis.requests_per_minute
+                      << " score=" << bot_analysis.suspicious_score << "\n";
+#endif
+            return;
+        }
+    }
+
+    Router r(*conn.servConf, req);
+    Route routy = r.route();
 
     if (routy.type == FILES && req.method == "GET")
     {

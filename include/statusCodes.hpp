@@ -10,6 +10,7 @@ enum ErrorCode
     NotFound = 404,
     MethodNotAllowed = 405,
     PayloadTooLarge = 413,
+    TooManyRequests = 429, // Bot detection rate limit
     InternalServerError = 500,
     NotImplemented = 501,
     BadGateway = 502,

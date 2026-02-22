@@ -13,6 +13,8 @@
 #include "configParser.hpp"
 #include "poller.h"
 #include "httpRequest.hpp"
+#include "botDetection.hpp"
+#include "captchaBypass.hpp"
 
 /* IPv4 = AF_INET (domain)
 TCP = SOCK_STREAM (type)
@@ -89,6 +91,9 @@ class Server
     std::vector<ListenSocket> listen_sockets;
     std::unordered_set<int> listen_fd_set;
     std::unordered_map<int, ClientCon> clients;
+    BotDetection::BotDetectionConfig bot_detection_config;
+    std::unordered_map<std::string, std::vector<BotDetection::RequestSample>> bot_request_history;
+    CaptchaBypass captcha_bypass;
 
     void new_connection(int listen_fd);
     void read_client(int client_fd);
