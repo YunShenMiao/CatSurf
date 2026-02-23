@@ -39,6 +39,10 @@ std::string static_content_type(const std::string& file_path)
 }
 }
 
+/*************************************************************************/
+/*                              SERVER                                   */
+/*************************************************************************/
+
 Server* Server::active_instance = nullptr;
 
 Server::Server(ConfigParser &config):
@@ -139,6 +143,415 @@ void Server::run()
     }
 }
 
+/*************************************************************************/
+/*                       CONNECTION MANAGEMENT                           */
+/*************************************************************************/
+
+void Server::new_connection(int listen_fd)
+{
+    while (true)
+    {
+        int client_fd = event::accept_connection(listen_fd);
+        if (client_fd == -1)
+            break;  // No more connections
+        
+        // Find which IP/port this listen socket is on
+        const ListenSocket* ls = get_listen_socket(listen_fd);
+        if (!ls)
+        {
+            event::close_socket(client_fd);
+            continue;
+        }
+        
+        event::set_non_blocking(client_fd);
+        poller->add(client_fd, true, false);
+        
+        auto inserted = clients.emplace(client_fd, ClientCon(client_fd, ls->ip, ls->port));
+        if (inserted.second)
+            capture_peername(client_fd, inserted.first->second);
+        #ifdef DEBUG
+        std::cout << "\nNew client " << client_fd << " connected to " << ls->port << "\n";
+        #endif
+    }
+}
+
+void Server::capture_peername(int client_fd, ClientCon& conn)
+{
+    sockaddr_in addr{};
+    socklen_t len = sizeof(addr);
+    if (getpeername(client_fd, reinterpret_cast<sockaddr*>(&addr), &len) == 0)
+    {
+        char buf[INET_ADDRSTRLEN];
+        if (inet_ntop(AF_INET, &addr.sin_addr, buf, sizeof(buf)))
+            conn.remote_addr = buf;
+        conn.remote_port_net = addr.sin_port;
+    }
+}
+
+void Server::check_timeouts()
+{
+    time_t now = std::time(nullptr);
+    std::vector<int> to_close;
+    
+    for (auto& [fd, conn] : clients)
+    {
+        int timeout = 60;
+        if (conn.servConf && conn.servConf->timeout > 0)
+            timeout = conn.servConf->timeout;
+
+        if (now - conn.last_act > timeout)
+        {
+            #ifdef DEBUG
+            std::cout << "\nClient " << fd << " timed out\n";
+            #endif
+            conn.req = HttpRequest();
+            to_close.push_back(fd);
+        }
+    }
+    
+    for (int fd : to_close)
+        close_client(fd);
+
+    if (cgi_manager)
+        cgi_manager->checkTimeouts(now);
+}
+
+void Server::close_client(int client_fd)
+{
+    auto it = clients.find(client_fd);
+    if (it == clients.end())
+        return;
+
+    if (it->second.upload_active)
+    {
+        it->second.upload_file.close();
+        unlink(it->second.upload_path.c_str());
+    }
+
+    reset_static_file_stream(it->second);
+
+    if (cgi_manager)
+        cgi_manager->handleClientClose(client_fd);
+    poller->remove(client_fd);
+    clients.erase(it);
+    event::close_socket(client_fd);
+    #ifdef DEBUG
+    std::cout << "\nClient " << client_fd << " disconnected\n";
+    #endif
+}
+
+/*************************************************************************/
+/*                          REQUEST PIPELINE                             */
+/*************************************************************************/
+
+bool Server::write_body(ClientCon& conn, const std::string& str, size_t len)
+{
+    if (conn.uploaded_bytes + len > MAX_CONT_LEN)
+    {
+        fallback_error(conn, PayloadTooLarge);
+        conn.upload_file.close();
+        unlink(conn.upload_path.c_str());
+        return false;
+    }
+
+    conn.upload_file.write(str.data(), len);
+
+    if (!conn.upload_file.good())
+    {
+        conn.upload_file.close();
+        unlink(conn.upload_path.c_str());
+        fallback_error(conn, InternalServerError);
+        return false;
+    }
+
+    conn.upload_bytes_remaining -= len;
+    conn.uploaded_bytes += len;
+    return true;
+}
+
+bool Server::processBody(ClientCon &conn, const std::string &str, ParseState *state, size_t *to_write)
+{
+    if (conn.chunked)
+    {
+        std::string processed = processChunkedBody(conn, str, *state);
+        if (*state == ERROR)
+        {
+            conn.upload_file.close();
+            unlink(conn.upload_path.c_str());
+            return false;
+        }
+        if (conn.MPFlag)
+        {
+            parseMultipart(conn, processed, processed.size());
+            if (conn.multipart_state == MP_ERROR)
+            {
+                fallback_error(conn, InternalServerError);
+                return false;
+            }
+        }
+        else if (!write_body(conn, processed, processed.size()))
+            return false;
+    }
+    else
+    {
+        *to_write = std::min(static_cast<size_t>(str.size()), conn.upload_bytes_remaining);
+        if (conn.MPFlag)
+        {
+            parseMultipart(conn, str, *to_write);
+            if (conn.multipart_state == MP_ERROR)
+            {
+                fallback_error(conn, InternalServerError);
+                return false;
+            }
+        }
+        else if (!write_body(conn, str, *to_write))
+            return false;
+    }
+    return true;
+}
+
+void Server::read_client(int client_fd)
+{
+    auto it = clients.find(client_fd);
+    if (it == clients.end())
+        return;
+    ClientCon& conn = it->second;
+    conn.last_act = std::time(nullptr);
+
+    std::array<char, 4096> buffer{};
+    int bytes = event::receive_data(client_fd, buffer.data(), buffer.size());
+
+    if (bytes <= 0)
+    {
+    #ifdef DEBUG
+        std::cout << "[READ] fd=" << conn.fd << " recv=" << bytes << " -> closing\n";
+    #endif
+        close_client(client_fd);
+        return;
+    }
+    size_t to_write = 0;
+    if (conn.upload_active)
+    {
+        ParseState state = BODY;
+        std::string str(buffer.data(), bytes);
+        if (!processBody(conn, str, &state, &to_write))
+            return;
+
+        if (conn.upload_bytes_remaining == 0 || state == COMPLETE || conn.multipart_state == MP_END)
+            uploadComplete(conn);
+    }
+    if (static_cast<size_t>(bytes) > to_write)
+    {
+        ParseState state = conn.req.parseRequest(buffer.data() + to_write, bytes - to_write);
+        if (state == ERROR)
+        {
+            int status = conn.req.getRequest().error_code;
+            if (status <= 0) status = 400;
+                fallback_error(conn, status);
+            return;
+        }
+
+        if (state == REQUEST_LINE || state == HEADERS)
+            return;
+        if (state == BODY || state == COMPLETE)
+        {
+            std::string host = conn.req.getHeaderVal("host");
+            conn.servConf = findServer(conn.ip, conn.port, host);
+            if (!conn.servConf)
+            {
+                fallback_error(conn, 500);
+                return;
+            }
+            process_request(conn);
+
+            if (conn.keep_alive && state == COMPLETE)
+                conn.req.clear();
+
+            #ifdef DEBUG
+                std::cout << "[READ] fd=" << conn.fd
+              << " state=" << state
+              << " uri=" << conn.req.getUri() << "\n";
+            #endif
+        }
+    }
+}
+
+void Server::process_request(ClientCon& conn)
+{
+    parsedRequest req = conn.req.getRequest();
+
+    std::string connection = str_tolower(conn.req.getHeaderVal("connection"));
+    if (req.http_v == "HTTP/1.1")
+        conn.keep_alive = connection != "close";
+    else if (req.http_v == "HTTP/1.0")
+        conn.keep_alive = connection == "keep-alive";
+
+    std::string fingerprint = conn.remote_addr.empty() ? std::to_string(conn.ip) : conn.remote_addr;
+    if (!req.user_agent.empty())
+        fingerprint += "|" + req.user_agent;
+
+    std::string bypass_cookie = captcha_bypass.extractTokenFromCookie(conn.req.getHeaderVal("cookie"));
+    bool has_bypass = captcha_bypass.hasValidBypass(bypass_cookie, fingerprint);
+
+    if (!has_bypass)
+    {
+        BotDetection::BotAnalysis bot_analysis = BotDetection::analyzeAndTrackRequest(
+            fingerprint,
+            req.uri,
+            bot_request_history,
+            bot_detection_config
+        );
+
+        if (bot_analysis.score == BotDetection::BotScore::BLOCKED)
+        {
+            if (captcha_bypass.isSolvedCaptchaPost(req.method, req.uri, req.body))
+            {
+                std::string token = captcha_bypass.createBypass(fingerprint);
+                HttpResponse res(conn.keep_alive ? "keep-alive" : "close", req.http_v);
+                res.setStatus(SeeOther);
+                res.setHeader("Location", "/");
+                res.setHeader("Set-Cookie",
+                              "catsurf_clearance=" + token +
+                              "; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax");
+                res.setHeader("Content-Length", "0");
+                conn.response_out = res.buildResponse();
+                conn.sent = 0;
+                conn.res_ready = true;
+                poller->update(conn.fd, false, true);
+                conn.last_act = std::time(nullptr);
+                return;
+            }
+
+            std::string body = captcha_bypass.buildCaptchaPage();
+            HttpResponse res(conn.keep_alive ? "keep-alive" : "close", req.http_v);
+            res.setStatus(TooManyRequests);
+            res.setHeader("Content-Type", "text/html; charset=utf-8");
+            res.setHeader("Cache-Control", "no-store");
+            res.setHeader("Content-Length", std::to_string(body.size()));
+            res.setHeader("Retry-After", std::to_string(bot_detection_config.block_duration_seconds));
+            res.setBody(body);
+
+            conn.response_out = res.buildResponse();
+            conn.sent = 0;
+            conn.res_ready = true;
+            poller->update(conn.fd, false, true);
+            conn.last_act = std::time(nullptr);
+#ifdef DEBUG
+            std::cout << "[BOT] blocked fp=" << fingerprint
+                      << " rpm=" << bot_analysis.requests_per_minute
+                      << " score=" << bot_analysis.suspicious_score << "\n";
+#endif
+            return;
+        }
+    }
+
+    Router r(*conn.servConf, req);
+    Route routy = r.route();
+
+    if (routy.type == FILES && req.method == "GET")
+    {
+        start_static_file_stream(conn, routy, req);
+        poller->update(conn.fd, false, true);
+        conn.last_act = std::time(nullptr);
+        return;
+    }
+
+    if (routy.type == CGI)
+    {
+#ifdef DEBUG
+        std::cout << "[ROUTE] CGI uri=" << req.uri
+                  << " query=" << req.query
+                  << " script=" << routy.script_path
+                  << " path_info=" << routy.path_info << "\n";
+#endif
+        if (!cgi_manager || !cgi_manager->launch(routy, req, conn, *conn.servConf))
+        {
+#ifdef DEBUG
+            std::cout << "[ROUTE] CGI launch failed" << "\n";
+#endif
+            fallback_error(conn, BadGateway);
+            return;
+        }
+        conn.last_act = std::time(nullptr);
+        return;
+    }
+
+#ifdef DEBUG
+    std::cout << "[ROUTE] type=" << static_cast<int>(routy.type)
+              << " uri=" << req.uri
+              << " file=" << routy.file_path << "\n";
+#endif
+
+    if (routy.type == UPLOAD && req.method == "POST")
+    {
+        startUpload(conn, routy, req);
+        conn.last_act = std::time(nullptr);
+        return;
+    }
+
+    RequestHandler handler(routy, req, *conn.servConf, conn.keep_alive);
+    HttpResponse res = handler.handle();
+    conn.response_out = res.buildResponse();
+    conn.res_ready = true;
+
+    poller->update(conn.fd, false, true);
+    conn.last_act = std::time(nullptr);
+}
+
+void Server::fallback_error(ClientCon& conn, int status)
+{
+    std::string body = generateErrorPage(status, mapStatus(status));
+
+    conn.response_out =
+        "HTTP/1.1 " + std::to_string(status) + " " + mapStatus(status) + "\r\n"
+        "Date: " + httpDate() + "\r\n"
+        "Server: CatSurf\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: " + std::to_string(body.size()) + "\r\n"
+        "Connection: close\r\n"
+        "\r\n" + body;
+
+    conn.keep_alive = false;
+    conn.res_ready = true;
+    poller->update(conn.fd, false, true);
+}
+
+
+const ServerConfig* Server::findServer(uint32_t ip, uint16_t port, const std::string& host_header)
+{
+	const std::vector<ServerConfig>& servers = config.getServers();
+    const ServerConfig *firstMatch = nullptr;
+
+    for (const auto& server : servers)
+  	{
+        for (const auto& lp : server.listen_port)
+    	{
+      		if (lp.ip == ip && lp.port == port)
+      		{
+        		if (!firstMatch)
+                    firstMatch = &server; 
+                if (!host_header.empty())
+        		{
+          			for (const auto& name : server.server_name)
+          			{
+                        if (name == str_tolower(host_header) || name == "_")
+                            return &server;
+          			}
+        		}
+      		}
+    	}
+  	}
+    if (firstMatch)
+    {
+        return firstMatch;
+    }
+  	return nullptr;
+}
+
+/*************************************************************************/
+/*                          RESPONSE PIPELINE                            */
+/*************************************************************************/
+
 //update(fd, read, write) -> event::update(fd, true, true);
 void Server::client_write(int client_fd)
 {
@@ -211,6 +624,48 @@ void Server::client_write(int client_fd)
     if (conn.res_ready)
         finalize_response_write(conn);
 }
+
+bool Server::finalize_response_write(ClientCon& conn)
+{
+    conn.res_ready = false;
+
+    if (conn.cgi_active)
+    {
+#ifdef DEBUG
+        std::cout << "[WRITE] fd=" << conn.fd
+                  << " CGI response complete"
+                  << " close_after=" << conn.close_after_send
+                  << " force_close=" << conn.cgi_force_close
+                  << " ka=" << conn.keep_alive << "\n";
+#endif
+        conn.cgi_active = false;
+        if (conn.close_after_send || conn.cgi_force_close || !conn.keep_alive)
+        {
+            conn.close_after_send = false;
+            close_client(conn.fd);
+            return false;
+        }
+        poller->update(conn.fd, true, false);
+        conn.last_act = std::time(nullptr);
+        return true;
+    }
+
+    if (conn.close_after_send || !conn.keep_alive)
+    {
+        conn.close_after_send = false;
+        close_client(conn.fd);
+        return false;
+    }
+    conn.close_after_send = false;
+    conn.req.clear();
+    conn.last_act = std::time(nullptr);
+    poller->update(conn.fd, true, false);
+    return true;
+}
+
+/*************************************************************************/
+/*                        STATIC FILESTREAMING                           */
+/*************************************************************************/
 
 bool Server::start_static_file_stream(ClientCon& conn, const Route& route, const parsedRequest& req)
 {
@@ -364,79 +819,9 @@ void Server::reset_static_file_stream(ClientCon& conn)
     conn.file_buf_off = 0;
 }
 
-bool Server::finalize_response_write(ClientCon& conn)
-{
-    conn.res_ready = false;
-
-    if (conn.cgi_active)
-    {
-#ifdef DEBUG
-        std::cout << "[WRITE] fd=" << conn.fd
-                  << " CGI response complete"
-                  << " close_after=" << conn.close_after_send
-                  << " force_close=" << conn.cgi_force_close
-                  << " ka=" << conn.keep_alive << "\n";
-#endif
-        conn.cgi_active = false;
-        if (conn.close_after_send || conn.cgi_force_close || !conn.keep_alive)
-        {
-            conn.close_after_send = false;
-            close_client(conn.fd);
-            return false;
-        }
-        poller->update(conn.fd, true, false);
-        conn.last_act = std::time(nullptr);
-        return true;
-    }
-
-    if (conn.close_after_send || !conn.keep_alive)
-    {
-        conn.close_after_send = false;
-        close_client(conn.fd);
-        return false;
-    }
-    conn.close_after_send = false;
-    conn.req.clear();
-    conn.last_act = std::time(nullptr);
-    poller->update(conn.fd, true, false);
-    return true;
-}
-
-void Server::new_connection(int listen_fd)
-{
-    while (true)
-    {
-        int client_fd = event::accept_connection(listen_fd);
-        if (client_fd == -1)
-            break;  // No more connections
-        
-        // Find which IP/port this listen socket is on
-        const ListenSocket* ls = get_listen_socket(listen_fd);
-        if (!ls)
-        {
-            event::close_socket(client_fd);
-            continue;
-        }
-        
-        event::set_non_blocking(client_fd);
-        poller->add(client_fd, true, false);
-        
-        auto inserted = clients.emplace(client_fd, ClientCon(client_fd, ls->ip, ls->port));
-        if (inserted.second)
-            capture_peername(client_fd, inserted.first->second);
-        #ifdef DEBUG
-        std::cout << "\nNew client " << client_fd << " connected to " << ls->port << "\n";
-        #endif
-    }
-}
-
-std::string generateFilename()
-{
-    static size_t count = 0;
-    std::ostringstream oss;
-    oss << std::time(nullptr) << "_" << count++;
-    return oss.str();
-}
+/*************************************************************************/
+/*                                UPLOAD                                 */
+/*************************************************************************/
 
 void Server::uploadComplete(ClientCon& conn)
 {
@@ -449,7 +834,6 @@ void Server::uploadComplete(ClientCon& conn)
     conn.res_ready = true;
     poller->update(conn.fd, false, true);
 }
-
 
 void Server::parseMultipartHeaders(ClientCon &conn, const std::string &head)
 {
@@ -471,9 +855,10 @@ void Server::parseMultipartHeaders(ClientCon &conn, const std::string &head)
         conn.multipart.mps[conn.multipart.part -1].content_type = head.substr(start + 14, end - (start + 14));
 }
 
-void Server::parseMultipart(ClientCon& conn, std::string body)
+void Server::parseMultipart(ClientCon& conn, std::string body, size_t to_write)
 {
-    conn.multipart.buffer += body;
+    conn.multipart.buffer.append(body.data(), to_write);
+    
     if (conn.multipart_state == MP_BOUNDARY)
     {
         conn.multipart_state = MP_HEADER;
@@ -486,22 +871,12 @@ void Server::parseMultipart(ClientCon& conn, std::string body)
         if (start != std::string::npos && endH != std::string::npos)
         {
             std::string MPheaders = conn.multipart.buffer.substr(start, endH);
-                                        std::cout << conn.multipart.boundary << std::endl;
             parseMultipartHeaders(conn, MPheaders);
-                            std::cout << conn.multipart.boundary << std::endl;
             conn.multipart.buffer.erase(0, endH + 4);
             conn.multipart_state = MP_BODY;
-            std::string fileName = generateFilename();
-            fileName += getMimeExt(conn.multipart.mps[conn.multipart.part -1].content_type);
-            std::cout << fileName << std::endl;
-            conn.upload_path += fileName ;
-            std::cout << conn.upload_path << std::endl;
-            conn.upload_file.open(conn.upload_path, std::ios::binary | std::ios::app);
-            if (!conn.upload_file.is_open())
-            {
-                fallback_error(conn, InternalServerError);
-                conn.multipart_state = MP_ERROR;
-            }
+
+        if (!openUploadFile(conn, getMimeExt(conn.multipart.mps[conn.multipart.part -1].content_type)))
+            return;
         }
         else
             return;
@@ -514,7 +889,8 @@ void Server::parseMultipart(ClientCon& conn, std::string body)
         size_t final_pos = conn.multipart.buffer.find(final_delim);
         if (final_pos != std::string::npos)
         {
-            conn.upload_file.write(conn.multipart.buffer.data(), final_pos);
+            if (!write_body(conn, conn.multipart.buffer, final_pos))
+                return;
             conn.upload_file.close();
             conn.multipart_state = MP_END;
             conn.multipart.buffer.clear();
@@ -525,114 +901,95 @@ void Server::parseMultipart(ClientCon& conn, std::string body)
 
         if (pos != std::string::npos)
         {
-            conn.upload_file.write(conn.multipart.buffer.data(), pos);
+            if (!write_body(conn, conn.multipart.buffer, pos))
+                return;
+    
             conn.multipart.buffer.erase(0, pos + 2);
             conn.multipart_state = MP_BOUNDARY;
         }
 
-        size_t guard = delimiter.length();
+        size_t guard = delimiter.length() + 4;
         if (conn.multipart.buffer.size() > guard)
         {
             size_t safe = conn.multipart.buffer.size() - guard;
-            conn.upload_file.write(conn.multipart.buffer.data(), safe);
+            if (!write_body(conn, conn.multipart.buffer, safe))
+                return;
             conn.multipart.buffer.erase(0, safe);
         }
 
         return;
-/*         auto endB = conn.multipart.buffer.find("\r\n--" + conn.multipart.boundary + "--");
-        if (endB != std::string::npos)
-        {
-            conn.multipart.buffer = conn.multipart.buffer.substr(endB - 4);
-            return COMPLETE;
-        }
-        else
-        {
-            conn.upload_file.write(conn.multipart.buffer.data(), conn.multipart.buffer.size() - (conn.multipart.boundary.size() + 4));
-            conn.upload_bytes_remaining -= conn.multipart.buffer.size() - (conn.multipart.boundary.size() + 4);
-        } */
-
     }
 }
 
-bool Server::uploadFile(ClientCon& conn, const Route& route, const parsedRequest& req)
+bool Server::openUploadFile(ClientCon &conn, std::string ext)
 {
-    if (!route.location || route.location->upload_path.empty())
+    std::string fileName = generateFilename() + ext;
+    conn.upload_path += fileName;
+    conn.upload_file.open(conn.upload_path, std::ios::binary | std::ios::app);
+    if (!conn.upload_file.is_open())
+    {
+        fallback_error(conn, InternalServerError);
         return false;
-
-    if (req.MPFlag)
-    {
-        conn.MPFlag = true;
-        auto sep = req.content_type.find("=");
-
-        if (sep != std::string::npos)
-        {
-            conn.multipart.boundary = req.content_type.substr(sep + 1);
-            if (conn.multipart.boundary.front() == '\"' && conn.multipart.boundary.back() == '\"')
-                conn.multipart.boundary = conn.multipart.boundary.substr(1, conn.multipart.boundary.size() - 2);
-        }
-        else
-            fallback_error(conn, BadRequest);
     }
-
-    std::string uploadPath = route.location->upload_path;
-    std::cout << uploadPath << std::endl;
-    if (uploadPath.back() != '/')
-        uploadPath += '/';
-    conn.upload_path = uploadPath;
-
-    if (!conn.MPFlag)
-    {
-        std::string fileName = generateFilename();
-        fileName += getExtUri(route.file_path);
-        uploadPath= uploadPath + fileName;
-
-        conn.upload_file.open(uploadPath, std::ios::binary | std::ios::app);
-        if (!conn.upload_file.is_open())
-            return false;
-    }
-
-    conn.upload_bytes_remaining = req.content_length;
-
-    if (!req.body.empty())
-    {
-        if (req.chunked)
-        {
-            conn.chunked = true;
-            ParseState state;
-            std::string processed = processChunkedBody(conn, req.body, state);
-            if (state == ERROR)
-                return false;
-            if (conn.MPFlag)
-                parseMultipart(conn, processed);
-            else
-            {
-                conn.upload_file.write(processed.data(), processed.size());
-                conn.upload_bytes_remaining -= processed.size();
-            }
-            if (state == COMPLETE)
-                uploadComplete(conn);
-        }
-        else
-        {
-            if (conn.MPFlag)
-                parseMultipart(conn, req.body);
-            else
-            {
-                conn.upload_file.write(req.body.data(), req.body.size());
-                conn.upload_bytes_remaining -= req.body.size();
-            }
-        }
-        conn.req.clear();
-    }                
-
-    if (!conn.chunked && conn.upload_bytes_remaining == 0)
-        uploadComplete(conn);
-    else
-        conn.upload_active = true;
-
     return true;
 }
 
+bool Server::setMPBoundary(ClientCon &conn, std::string content_type)
+{
+    conn.MPFlag = true;
+    auto sep = content_type.find("=");
+
+    if (sep != std::string::npos)
+    {
+        conn.multipart.boundary = content_type.substr(sep + 1);
+        if (conn.multipart.boundary.front() == '\"' && conn.multipart.boundary.back() == '\"')
+            conn.multipart.boundary = conn.multipart.boundary.substr(1, conn.multipart.boundary.size() - 2);
+    }
+    else
+    {
+        fallback_error(conn, BadRequest);
+        return false;
+    }
+    return true;
+}
+
+void Server::startUpload(ClientCon& conn, const Route& route, const parsedRequest& req)
+{
+    if (!route.location || route.location->upload_path.empty())
+    {
+        fallback_error(conn, Forbidden);
+        return;
+    }
+    if (req.MPFlag)
+    {
+        if (!setMPBoundary(conn, req.content_type))
+            return;
+    }
+    conn.upload_path = addBackSlash(route.location->upload_path);
+    if (!conn.MPFlag)
+    { 
+        if (!openUploadFile(conn, getExtUri(route.file_path)))
+            return;
+    }
+    conn.upload_bytes_remaining = req.content_length;
+    ParseState state = BODY;
+    if (!req.body.empty())
+    {
+        if (req.chunked)
+            conn.chunked = true;
+        size_t to_write = 0;
+        if (!processBody(conn, req.body, &state, &to_write))
+            return;
+        conn.req.clear();
+    }      
+
+    if (!conn.chunked && conn.upload_bytes_remaining == 0)
+        uploadComplete(conn);
+    else if (state == COMPLETE || conn.multipart_state == MP_END)
+        uploadComplete(conn); 
+    else
+        conn.upload_active = true;
+}
 
 std::string Server::processChunkedBody(ClientCon& conn, std::string buffer, ParseState& state)
 {
@@ -666,160 +1023,26 @@ std::string Server::processChunkedBody(ClientCon& conn, std::string buffer, Pars
 
     if (buffer.size() < crlf + 2 + chunk_size + 2)
         return decoded;
-
-/*     if (buffer[crlf + 2 + chunk_size] != '\r' || buffer[crlf + 2 + chunk_size + 1] != '\n')
-        setError(BadRequest, "malformed chunk");
-    if (body.size() + chunk_size > MAX_CONT_LEN)
-        setError(PayloadTooLarge, "body exceeds maximum size"); */
+    if (buffer[crlf + 2 + chunk_size] != '\r' || buffer[crlf + 2 + chunk_size + 1] != '\n')
+    {
+        state = ERROR;
+        fallback_error(conn, BadRequest);
+        return "";
+    }
+    if (conn.uploaded_bytes + chunk_size > MAX_CONT_LEN)
+    {
+        state = ERROR; 
+        fallback_error(conn, PayloadTooLarge);
+        return "";
+    }
     decoded.append(buffer, crlf + 2, chunk_size);
     buffer.erase(0, crlf + 2 + chunk_size + 2);
     return decoded;
 }
 
-
-
-void Server::read_client(int client_fd)
-{
-    auto it = clients.find(client_fd);
-    if (it == clients.end())
-        return;
-    ClientCon& conn = it->second;
-    conn.last_act = std::time(nullptr);
-
-    std::array<char, 4096> buffer{};
-    int bytes = event::receive_data(client_fd, buffer.data(), buffer.size());
-
-    if (bytes <= 0)
-    {
-    #ifdef DEBUG
-        std::cout << "[READ] fd=" << conn.fd << " recv=" << bytes << " -> closing\n";
-    #endif
-        close_client(client_fd);
-        return;
-    }
-    size_t to_write = 0;
-    if (conn.upload_active)
-    {
-        ParseState state = BODY;
-        if (conn.chunked)
-        {
-            std::string str(buffer.data(), bytes);
-            std::string processed = processChunkedBody(conn, str, state);
-            if (state == ERROR)
-                return;
-            if (conn.MPFlag)
-                    parseMultipart(conn, processed);
-            else
-            {
-                conn.upload_file.write(processed.data(), processed.size());
-                conn.upload_bytes_remaining -= processed.size();
-            }
-        }
-        else
-        {
-            to_write = std::min(static_cast<size_t>(bytes), conn.upload_bytes_remaining);
-            if (conn.MPFlag)
-                parseMultipart(conn, std::string(buffer.data(), to_write));
-            else
-                conn.upload_file.write(buffer.data(), to_write);
-            conn.upload_bytes_remaining -= to_write;
-        }
-        if (!conn.upload_file)
-        {
-            conn.upload_file.close();
-            unlink(conn.upload_path.c_str());
-            fallback_error(conn, 500);
-            return;
-        }
-
-        if (conn.upload_bytes_remaining == 0 || state == COMPLETE || conn.multipart_state == MP_END)
-            uploadComplete(conn);
-    }
-    if (static_cast<size_t>(bytes) > to_write)
-    {
-        ParseState state = conn.req.parseRequest(buffer.data() + to_write, bytes - to_write);
-        if (state == ERROR)
-        {
-            int status = conn.req.getRequest().error_code;
-            if (status <= 0) status = 400;
-                fallback_error(conn, status);
-            return;
-        }
-
-        if (state == REQUEST_LINE || state == HEADERS)
-            return;
-        if (state == BODY || state == COMPLETE)
-        {
-            std::string host = conn.req.getHeaderVal("host");
-            conn.servConf = findServer(conn.ip, conn.port, host);
-            if (!conn.servConf)
-            {
-                fallback_error(conn, 500);
-                return;
-            }
-            process_request(conn);
-
-            if (state == COMPLETE)
-                conn.req.clear();
-
-            #ifdef DEBUG
-                std::cout << "[READ] fd=" << conn.fd
-              << " state=" << state
-              << " uri=" << conn.req.getUri() << "\n";
-            #endif
-        }
-    }
-}
-
-void Server::fallback_error(ClientCon& conn, int status)
-{
-    std::string body = generateErrorPage(status, mapStatus(status));
-
-    conn.response_out =
-        "HTTP/1.1 " + std::to_string(status) + " " + mapStatus(status) + "\r\n"
-        "Date: " + httpDate() + "\r\n"
-        "Server: CatSurf\r\n"
-        "Content-Type: text/html\r\n"
-        "Content-Length: " + std::to_string(body.size()) + "\r\n"
-        "Connection: close\r\n"
-        "\r\n" + body;
-
-    conn.keep_alive = false;
-    conn.res_ready = true;
-    poller->update(conn.fd, false, true);
-}
-
-
-const ServerConfig* Server::findServer(uint32_t ip, uint16_t port, const std::string& host_header)
-{
-	const std::vector<ServerConfig>& servers = config.getServers();
-    const ServerConfig *firstMatch = nullptr;
-
-    for (const auto& server : servers)
-  	{
-        for (const auto& lp : server.listen_port)
-    	{
-      		if (lp.ip == ip && lp.port == port)
-      		{
-        		if (!firstMatch)
-                    firstMatch = &server; 
-                if (!host_header.empty())
-        		{
-          			for (const auto& name : server.server_name)
-          			{
-                        if (name == str_tolower(host_header) || name == "_")
-                            return &server;
-          			}
-        		}
-      		}
-    	}
-  	}
-    if (firstMatch)
-    {
-        return firstMatch;
-    }
-  	return nullptr;
-}
+/*************************************************************************/
+/*                                SOCKET                                 */
+/*************************************************************************/
 
 const ListenSocket* Server::get_listen_socket(int fd) const
 {
@@ -829,128 +1052,6 @@ const ListenSocket* Server::get_listen_socket(int fd) const
             return &ls;
     }
     return nullptr;
-}
-
-void Server::process_request(ClientCon& conn)
-{
-    parsedRequest req = conn.req.getRequest();
-
-    std::string connection = str_tolower(conn.req.getHeaderVal("connection"));
-    if (req.http_v == "HTTP/1.1")
-        conn.keep_alive = connection != "close";
-    else if (req.http_v == "HTTP/1.0")
-        conn.keep_alive = connection == "keep-alive";
-
-    std::string fingerprint = conn.remote_addr.empty() ? std::to_string(conn.ip) : conn.remote_addr;
-    if (!req.user_agent.empty())
-        fingerprint += "|" + req.user_agent;
-
-    std::string bypass_cookie = captcha_bypass.extractTokenFromCookie(conn.req.getHeaderVal("cookie"));
-    bool has_bypass = captcha_bypass.hasValidBypass(bypass_cookie, fingerprint);
-
-    if (!has_bypass)
-    {
-        BotDetection::BotAnalysis bot_analysis = BotDetection::analyzeAndTrackRequest(
-            fingerprint,
-            req.uri,
-            bot_request_history,
-            bot_detection_config
-        );
-
-        if (bot_analysis.score == BotDetection::BotScore::BLOCKED)
-        {
-            if (captcha_bypass.isSolvedCaptchaPost(req.method, req.uri, req.body))
-            {
-                std::string token = captcha_bypass.createBypass(fingerprint);
-                HttpResponse res(conn.keep_alive ? "keep-alive" : "close", req.http_v);
-                res.setStatus(SeeOther);
-                res.setHeader("Location", "/");
-                res.setHeader("Set-Cookie",
-                              "catsurf_clearance=" + token +
-                              "; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax");
-                res.setHeader("Content-Length", "0");
-                conn.response_out = res.buildResponse();
-                conn.sent = 0;
-                conn.res_ready = true;
-                poller->update(conn.fd, false, true);
-                conn.last_act = std::time(nullptr);
-                return;
-            }
-
-            std::string body = captcha_bypass.buildCaptchaPage();
-            HttpResponse res(conn.keep_alive ? "keep-alive" : "close", req.http_v);
-            res.setStatus(TooManyRequests);
-            res.setHeader("Content-Type", "text/html; charset=utf-8");
-            res.setHeader("Cache-Control", "no-store");
-            res.setHeader("Content-Length", std::to_string(body.size()));
-            res.setHeader("Retry-After", std::to_string(bot_detection_config.block_duration_seconds));
-            res.setBody(body);
-
-            conn.response_out = res.buildResponse();
-            conn.sent = 0;
-            conn.res_ready = true;
-            poller->update(conn.fd, false, true);
-            conn.last_act = std::time(nullptr);
-#ifdef DEBUG
-            std::cout << "[BOT] blocked fp=" << fingerprint
-                      << " rpm=" << bot_analysis.requests_per_minute
-                      << " score=" << bot_analysis.suspicious_score << "\n";
-#endif
-            return;
-        }
-    }
-
-    Router r(*conn.servConf, req);
-    Route routy = r.route();
-
-    if (routy.type == FILES && req.method == "GET")
-    {
-        start_static_file_stream(conn, routy, req);
-        poller->update(conn.fd, false, true);
-        conn.last_act = std::time(nullptr);
-        return;
-    }
-
-    if (routy.type == CGI)
-    {
-#ifdef DEBUG
-        std::cout << "[ROUTE] CGI uri=" << req.uri
-                  << " query=" << req.query
-                  << " script=" << routy.script_path
-                  << " path_info=" << routy.path_info << "\n";
-#endif
-        if (!cgi_manager || !cgi_manager->launch(routy, req, conn, *conn.servConf))
-        {
-#ifdef DEBUG
-            std::cout << "[ROUTE] CGI launch failed" << "\n";
-#endif
-            fallback_error(conn, BadGateway);
-            return;
-        }
-        conn.last_act = std::time(nullptr);
-        return;
-    }
-
-#ifdef DEBUG
-    std::cout << "[ROUTE] type=" << static_cast<int>(routy.type)
-              << " uri=" << req.uri
-              << " file=" << routy.file_path << "\n";
-#endif
-
-    if (routy.type == UPLOAD && req.method == "POST")
-    {
-        uploadFile(conn, routy, req);
-        conn.last_act = std::time(nullptr);
-        return;
-    }
-
-    RequestHandler handler(routy, req, *conn.servConf, conn.keep_alive);
-    HttpResponse res = handler.handle();
-    conn.response_out = res.buildResponse();
-    conn.res_ready = true;
-
-    poller->update(conn.fd, false, true);
-    conn.last_act = std::time(nullptr);
 }
 
 int Server::create_and_listen(const ListenPort& lp)
@@ -1041,6 +1142,10 @@ void Server::handle_signal_pipe()
     reap_children();
 }
 
+/*************************************************************************/
+/*                               CGI                                     */
+/*************************************************************************/
+
 void Server::reap_children()
 {
     if (!cgi_manager)
@@ -1066,70 +1171,4 @@ void Server::drain_client_backpressure(ClientCon& conn)
 {
     if (cgi_manager && conn.cgi_active)
         cgi_manager->notifyClientWritable(conn.fd);
-}
-
-void Server::capture_peername(int client_fd, ClientCon& conn)
-{
-    sockaddr_in addr{};
-    socklen_t len = sizeof(addr);
-    if (getpeername(client_fd, reinterpret_cast<sockaddr*>(&addr), &len) == 0)
-    {
-        char buf[INET_ADDRSTRLEN];
-        if (inet_ntop(AF_INET, &addr.sin_addr, buf, sizeof(buf)))
-            conn.remote_addr = buf;
-        conn.remote_port_net = addr.sin_port;
-    }
-}
-
-void Server::check_timeouts()
-{
-    time_t now = std::time(nullptr);
-    std::vector<int> to_close;
-    
-    for (auto& [fd, conn] : clients)
-    {
-        int timeout = 60;
-        if (conn.servConf && conn.servConf->timeout > 0)
-            timeout = conn.servConf->timeout;
-
-        if (now - conn.last_act > timeout)
-        {
-            #ifdef DEBUG
-            std::cout << "\nClient " << fd << " timed out\n";
-            #endif
-            conn.req = HttpRequest();
-            to_close.push_back(fd);
-        }
-    }
-    
-    for (int fd : to_close)
-        close_client(fd);
-
-    if (cgi_manager)
-        cgi_manager->checkTimeouts(now);
-}
-
-void Server::close_client(int client_fd)
-{
-    auto it = clients.find(client_fd);
-    if (it == clients.end())
-        return;
-
-    if (it->second.upload_active)
-    {
-        it->second.upload_file.close();
-        unlink(it->second.upload_path.c_str());
-    }
-
-
-    reset_static_file_stream(it->second);
-
-    if (cgi_manager)
-        cgi_manager->handleClientClose(client_fd);
-    poller->remove(client_fd);
-    clients.erase(it);
-    event::close_socket(client_fd);
-    #ifdef DEBUG
-    std::cout << "\nClient " << client_fd << " disconnected\n";
-    #endif
 }

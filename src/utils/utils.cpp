@@ -10,6 +10,21 @@
 #include <algorithm>
 #include <map>
 
+std::string addBackSlash(std::string path)
+{
+    if (path.back() != '/')
+        path += '/';
+    return path;
+}
+
+std::string generateFilename()
+{
+    static size_t count = 0;
+    std::ostringstream oss;
+    oss << std::time(nullptr) << "_" << count++;
+    return oss.str();
+}
+
 std::string getExtUri(std::string uri)
 {
 

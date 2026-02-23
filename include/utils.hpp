@@ -3,6 +3,8 @@
 
 #include <string>
 
+std::string addBackSlash(std::string path);
+std::string generateFilename();
 std::string getMime(std::string path);
 std::string getMimeExt(std::string mime);
 std::string getExtUri(std::string uri);

@@ -77,6 +77,7 @@ struct ClientCon
     int MPCount = 0;
     std::string upload_path;
     size_t upload_bytes_remaining = 0;
+    size_t uploaded_bytes = 0;
     bool chunked = false;
 
     ClientCon(int fd, uint32_t ip, uint16_t port):
@@ -125,12 +126,17 @@ class Server
     CaptchaBypass captcha_bypass;
 
     void new_connection(int listen_fd);
+    void resetConnection(ClientCon& conn);
+    bool processBody(ClientCon &conn, const std::string &str, ParseState *state, size_t *to_write);
+    bool setMPBoundary(ClientCon &conn, std::string content_type);
+    bool openUploadFile(ClientCon &conn, std::string ext);
+    bool write_body(ClientCon &conn, const std::string &str, size_t len);
     void read_client(int client_fd);
     void parseMultipartHeaders(ClientCon &conn, const std::string &head);
-    void parseMultipart(ClientCon& conn, std::string body);
+    void parseMultipart(ClientCon& conn, std::string body, size_t to_write);
     std::string processChunkedBody(ClientCon& conn, std::string buffer, ParseState& state);
     void uploadComplete(ClientCon& conn);
-    bool uploadFile(ClientCon& conn, const Route& route, const parsedRequest& req);
+    void startUpload(ClientCon& conn, const Route& route, const parsedRequest& req);
     void client_write(int client_fd);
     const ServerConfig* findServer(uint32_t ip, uint16_t port, const std::string& host_header);
     void process_request(ClientCon& conn);
