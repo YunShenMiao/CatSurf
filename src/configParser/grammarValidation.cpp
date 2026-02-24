@@ -154,7 +154,7 @@ bool isPath(const std::string& str)
 
 bool isLocationPath(const std::string& str)
 {
-    if (str.empty() || str[0] != '/') 
+    if (str.empty() || str[0] != '/')
     return false;
 
     if (str.find("..") != std::string::npos)

@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sys/stat.h>
 #include <algorithm>
+#include <filesystem>
 
 Router::Router(const ServerConfig& server, const parsedRequest &req): server(server), req(req) {}
 
@@ -83,6 +84,7 @@ Route Router::route()
 {    
     const LocationConfig *loc = findLocation(req.uri);
     result.location = loc;
+
     if (!loc && req.method != "GET")
 	{
         result.type = ERR;
@@ -108,11 +110,11 @@ Route Router::route()
         result.file_path = normalizePath(req.uri);
         return result;
     }
-
 	else
 	{
 		std::string safe_uri = normalizePath(req.uri);
-        result.file_path = mapURI(loc, safe_uri);
+        result.file_path = mapURI(loc, req.uri);
+
         if (result.file_path.empty())
         {
             result.type = ERR;
@@ -123,7 +125,7 @@ Route Router::route()
 		struct stat st;
         if (stat(result.file_path.c_str(), &st) != 0)
         {
-            if (loc && resolveCgiPathInfo(loc, safe_uri))
+            if (loc && resolveCgiPathInfo(loc, safe_uri ))
                 return result;
             result.type = ERR;
             result.status = NotFound;
@@ -131,6 +133,7 @@ Route Router::route()
         else if (S_ISDIR(st.st_mode))
         {
             std::string index_path = mapIndexPath(result.file_path, loc);
+            std::cout << index_path << std::endl;
         
             if (!index_path.empty())
             {
@@ -173,6 +176,7 @@ Route Router::route()
             }
             else
             {
+                std::cout << "entered\n" << std::endl;
                 result.type = ERR;
                 result.status = Forbidden;
             }
@@ -238,29 +242,30 @@ std::string Router::mapURI(const LocationConfig *loc, const std::string &uri)
         root += '/';
     
     std::string relative_path = uri;
-    if (loc && uri.find(loc->path) == 0)
-    {
-        relative_path = uri.substr(loc->path.length());
-        if (relative_path.empty() || relative_path[0] != '/')
-            relative_path = "/" + relative_path;
-    }
 
-    relative_path = normalizePath(relative_path);
+    if (loc && uri.find(loc->path) == 0)
+        relative_path = uri.substr(loc->path.length());
+ 
+    if (relative_path.empty() || relative_path[0] != '/')
+        relative_path = "/" + relative_path;
     if (!relative_path.empty() && relative_path[0] == '/')
         relative_path = relative_path.substr(1);
 
-    std::string full_path = root + relative_path;
-    if (full_path.size() < root.size() || full_path.compare(0, root.size(), root) != 0)
-        return "";
+    std::string full_path = normalizePath(root + relative_path);
+    /*  std::filesystem::path fp = std::filesystem::weakly_canonical(root + relative_path);
+    std::string full_path = fp.string(); */
+
+    std::cout << root << std::endl;
+    std::cout << full_path << std::endl;
 
     if (!isWithinFSRoot(full_path, root))
         return "";
-    
+    std::cout << full_path << std::endl;
     return full_path;
 }
 
 // Best match: exact match or prefix match with / boundary
-const LocationConfig* Router::findLocation(const std::string& uri) const
+/* const LocationConfig* Router::findLocation(const std::string& uri) const
 {
 	if (server.locations.empty())
     	return nullptr;
@@ -296,6 +301,36 @@ const LocationConfig* Router::findLocation(const std::string& uri) const
         }
     }
     return best_match;
+} */
+
+const LocationConfig* Router::findLocation(const std::string& uri) const
+{
+    const LocationConfig* best = nullptr;
+    size_t best_len = 0;
+
+    for (const auto& loc : server.locations)
+    {
+        const std::string& path = loc.path;
+        size_t len = path.length();
+
+/*         if (uri == path)
+        {
+            best = &loc;
+            return best;
+        } */
+        if (uri.compare(0, len, path) == 0)
+        {
+            if ((path.back() == '/') || (uri.length() == len) || (uri[len] == '/'))
+            {
+                if (len > best_len)
+                {
+                    best = &loc;
+                    best_len = len;
+                }
+            }
+        }
+    }
+    return best;
 }
 
 void Router::finalizeCgiRoute(const LocationConfig* loc,
