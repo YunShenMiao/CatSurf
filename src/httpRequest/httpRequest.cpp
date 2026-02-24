@@ -7,9 +7,7 @@
 
 
 /*
-1) CLOSE CONNECTION
-depending on reason need to close connection after error (". If the unrecoverable error is in a request message, the server
-respond with a 400 (Bad Request) status code and then close the connection. )")
+
 
 2) PREFER TRANSFER OR RESULT IN ERROR?
 TRANSFER ENCODING OVERWRITES CONTENT_LENGTH
@@ -28,15 +26,6 @@ Header fields too large	431	431 Request Header Fields Too Large
 URI too long	414	414 URI Too Long
 Invalid Content-Length	400	400 Bad Request
 Body too large	413	413 Payload Too Large */
-
-
-/* 
-4) need to check again if this is about error oooor!!
-A message that uses a valid Content-Length is
-incomplete if the size of the message body received (in octets) is less than the value given by
-Content-Length. A response that has neither chunked transfer coding nor Content-Length is
-terminated by closure of the connection and, if the header section was received intact, is
-considered complete unless an error was indicated by the underlying connection   p25*/
 
 /*  
 5) whould we handle? what would be excessive?
@@ -70,7 +59,6 @@ HttpRequest& HttpRequest::operator=(const HttpRequest& other)
         chunked = other.chunked;
         state = other.state;
         error_info = other.error_info;
-        /* mp = other.mp; */
         MPFlag = other.MPFlag;
         chunked = other.chunked;
     }
@@ -175,15 +163,6 @@ void skipWhitespace(const std::string& str, size_t& i)
         i++;
 }
 
-// for event loop sth like this
-/* std::vector<parsedRequest> requests;
-if(state == COMPLETE)
-{
-    requests.push_back(obj.getRequest());
-    obj.clear();
-}
- */
-
 void HttpRequest::clear()
 {
     method.clear();
@@ -204,8 +183,6 @@ void HttpRequest::clear()
 /*                      VALIDATION                         */
 /***********************************************************/
 
-// [] in case of ipv6
-// what about # 
 bool HttpRequest::validateEncodedURI(const std::string& str)
 {
     if (str.empty() || str.size() > MAX_URI)
@@ -448,50 +425,6 @@ void HttpRequest::check_transfer_enc()
     }
 }
 
-//size chunk in hex, content chunk, ...
-// no trailer header support
-// DO I NEED TO ADD MAX CHUNK SIZE && PARSE CHUNK SIZE? (rfc page 21), how is stoul handling 
-// bad request if chunk size line includes ; (anything thats not valid hex)
-/* ParseState HttpRequest::parseChunkedBody(std::string& buffer)
-{
-    while (true)
-    {
-        size_t crlf = buffer.find("\r\n");
-        if (crlf == std::string::npos)
-            return BODY;
-
-        std::string size_str = buffer.substr(0, crlf);
-        size_t chunk_size;
-        try
-        {
-            chunk_size = std::stoul(size_str, nullptr, 16);
-        }
-        catch (std::exception &e)
-        {
-            setError(BadRequest, "Invalid chunk size");
-        }
-        if (chunk_size == 0)
-        {
-        if (buffer.size() < crlf + 4)
-            return BODY;
-        buffer.erase(0, crlf + 4);
-        return COMPLETE;
-        }
-        if (buffer.size() < crlf + 2 + chunk_size + 2)
-            return BODY;
-        if (buffer[crlf + 2 + chunk_size] != '\r' || buffer[crlf + 2 + chunk_size + 1] != '\n')
-            setError(BadRequest, "malformed chunk");
-        if (body.size() + chunk_size > MAX_CONT_LEN)
-            setError(PayloadTooLarge, "body exceeds maximum size");
-        body.append(buffer, crlf + 2, chunk_size);
-        buffer.erase(0, crlf + 2 + chunk_size + 2);
-    }
-} */
-
-// decided not to reject GET & DELETE with body
-/*                     if (method != "POST")
-                        setError(BadRequest, "method shouldn't contain Body");
-                    else */
 // need to add checks for payload too large, uri too long, request header fields too large
 ParseState HttpRequest::parseRequest(const char* data, size_t len)
 {
@@ -561,7 +494,6 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 std::cout << "[PARSER] headers ok count=" << headers.size() << "\n";
 #endif
                 buffer.erase(0, pos + 4);
-                // maybe just chunked check and then inside chunked need to see if error or notwith cont len, what had precedence?
                 if (content_length == 0 && !chunked)
                     state = COMPLETE;
                 else
@@ -588,20 +520,6 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
             }
             return state;
         }
-/*         else if (state == BODY) 
-        {
-            if (chunked)
-                state = parseChunkedBody(buffer);
-            else if (buffer.size() >= content_length) 
-            {
-                body = buffer.substr(0, content_length);
-                buffer.erase(0, content_length);
-                state = COMPLETE;
-            }
-            if (state == COMPLETE && !content_type.empty() && content_type.find("multipart/form-data") != std::string::npos)
-                parseMultipart();
-            return state;
-        } */
     }
     return state;
 }

@@ -14,14 +14,6 @@
 
 enum ParseState {REQUEST_LINE, HEADERS, BODY, COMPLETE, ERROR};
 
-/* struct MPBody
-{
-    std::string name;
-    std::string filename;
-    std::string content_type;
-    std::string body;
-}; */
-
 struct parsedRequest
 {
     std::string buffer;
@@ -35,7 +27,6 @@ struct parsedRequest
     std::string content_type;
     int error_code;
     std::string error_info;
-    /* MPBody mp; */
     bool chunked = false;
     bool MPFlag = false;
     std::string user_agent;
@@ -59,7 +50,6 @@ class HttpRequest
     ParseState state;
     bool chunked;
     bool MPFlag;
-    /* MPBody mp; */
 
     bool validateEncodedURI(const std::string& str);
     void parseSL(std::string cont);
