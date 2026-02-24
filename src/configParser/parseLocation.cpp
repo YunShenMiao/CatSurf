@@ -9,6 +9,7 @@ void ConfigParser::setLocationDefaults(LocationConfig& loc, ServerConfig& serv)
     loc.root = serv.root;
     loc.index = serv.index;
     loc.allow_methods = {"GET", "POST", "DELETE"};
+    loc.botdetect = true;
 }
 
 void ConfigParser::setLocDirective(const std::string& key, const std::string& value, Type t, LocationConfig& loc)
@@ -28,6 +29,8 @@ void ConfigParser::setLocDirective(const std::string& key, const std::string& va
         loc.cgi_path = resolveConfigPath(value);
     else if (key == "upload_path")
         loc.upload_path = resolveConfigPath(value);
+    else if (key == "botdetect")
+        loc.botdetect = (value == "yes");
 }
 
 void ConfigParser::setLocDirective(const std::string& key, const std::vector<std::string>& value, Type t, LocationConfig& loc)

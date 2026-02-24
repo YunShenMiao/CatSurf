@@ -25,6 +25,7 @@ struct LocationConfig
     std::string cgi_path;
     std::string upload_path;
     bool autoindex = 0;
+    bool botdetect = true;
     size_t client_max_body_size = 0;
     std::vector<std::string> cgi_extension;
     std::vector<std::string> return_;
@@ -76,7 +77,8 @@ enum Type
     REDIRECT,
     TIME,
     CGI_EXT,
-    METH
+    METH,
+    YESNO
 };
 
 enum Block
@@ -159,6 +161,7 @@ bool isSize(const std::string& str);
 bool isUrl(const std::string& str);
 bool isTime(const std::string& str);
 bool isRedirect(const std::vector<std::string>& values);
+bool isYesNo(const std::string& str);
 size_t parseSize(const std::string& str);
 size_t parseTime(const std::string& str);
 uint32_t parseIPv4(const std::string& ip_str);

@@ -41,6 +41,7 @@ void ConfigParser::printLocation(const LocationConfig& loc, size_t idx) const
     std::cout << std::setw(18) << "path:" << loc.path << std::endl;
     std::cout << std::setw(18) << "root:" << loc.root << std::endl;
     std::cout << std::setw(18) << "autoindex:" << loc.autoindex << std::endl;
+    std::cout << std::setw(18) << "botdetect:" << loc.botdetect << std::endl;
     std::cout << std::setw(18) << "max_size:" << loc.client_max_body_size << std::endl;
     std::cout << std::setw(18) << "cgi_path:" << loc.cgi_path << std::endl;
     std::cout << std::setw(18) << "upload_path:" << loc.upload_path << std::endl;
