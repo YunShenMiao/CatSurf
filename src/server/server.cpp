@@ -136,7 +136,7 @@ void Server::run()
             }
             if (event.readable)
                 read_client(event.fd);
-            if (event.writable)
+            else if (event.writable)
                 client_write(event.fd);
         } 
         check_timeouts(); 
