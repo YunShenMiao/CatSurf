@@ -202,12 +202,15 @@ std::string mapStatus(int code)
         case 301: return "Moved Permanently";
         case 302: return "Found";
         case 303: return "See Other";
+        case 307: return "Temporary Redirect";
+        case 308: return "Permanent Redirect";
 
         case 400: return "Bad Request";
         case 403: return "Forbidden";
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
         case 413: return "Payload Too Large";
+        case 429: return "Too Many Requests";
         case 502: return "Bad Gateway";
         case 504: return "Gateway Timeout";
 
