@@ -91,10 +91,19 @@ Route Router::route()
 		result.status = MethodNotAllowed;
         return result;
 	}
-    if (loc && !loc->return_.empty())
+	if (loc && !loc->return_.empty())
 	{
 		result.type = RED;
-		result.status = std::stoi(loc->return_[0]);
+        try
+        {
+		    result.status = std::stoi(loc->return_[0]);
+        }
+        catch (const std::exception&)
+        {
+            result.type = ERR;
+            result.status = InternalServerError;
+            return result;
+        }
         if (loc->return_.size() > 1)
             result.redirect_url = loc->return_[1];
 	}

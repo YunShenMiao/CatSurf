@@ -216,7 +216,15 @@ size_t parseSize(const std::string& str)
     else
         numbers = str;
 
-    size_t size = std::stoul(numbers);
+    size_t size = 0;
+    try
+    {
+        size = std::stoul(numbers);
+    }
+    catch (const std::exception&)
+    {
+        throw std::runtime_error("Invalid size value: " + str);
+    }
     switch (suffix)
     {
         case 'K': return size * 1024;
@@ -351,7 +359,15 @@ size_t parseTime(const std::string& str)
         }
     }
 
-    size_t base = std::stoul(numbers);
+    size_t base = 0;
+    try
+    {
+        base = std::stoul(numbers);
+    }
+    catch (const std::exception&)
+    {
+        throw std::runtime_error("Invalid time value: " + str);
+    }
     size_t multiplier = 1000;
     if (suffix == "ms")
         multiplier = 1;
