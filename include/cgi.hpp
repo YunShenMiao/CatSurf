@@ -8,7 +8,15 @@
 #include <vector>
 #include <ctime>
 
+#ifndef _WIN32
 #include <sys/types.h>
+#else
+#include <cstdint>
+#ifndef _PID_T_DEFINED
+typedef int pid_t;
+#define _PID_T_DEFINED
+#endif
+#endif
 
 #include "httpRequest.hpp"
 #include "router.hpp"

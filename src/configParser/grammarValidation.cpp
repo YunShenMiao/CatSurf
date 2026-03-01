@@ -2,7 +2,15 @@
 #include <limits>
 #include <iostream>
 #include <stdexcept>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
+#endif
 
 #include "../../include/configParser.hpp"
 #include "../../include/utils.hpp"
@@ -11,36 +19,36 @@ const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
 {
     {GLOBAL, 
         {
-            {"error_log", PATH},
-            {"pid", PATH}
+            {"error_log", Type::Path},
+            {"pid", Type::Path}
         }
     },
     {SERVER, 
         {
-            {"listen", PORT},
-            {"root", PATH},
-            {"index", FILENAME},
-            {"server_name", DOMAIN},
-            {"error_page", MAP},
-            {"client_max_body_size", SIZE},
-            {"timeout", TIME},
-            {"cgi_timeout", TIME},
-            {"cgi_idle_timeout", TIME},
-            {"location", BLOCK}
+            {"listen", Type::Port},
+            {"root", Type::Path},
+            {"index", Type::Filename},
+            {"server_name", Type::Domain},
+            {"error_page", Type::Map},
+            {"client_max_body_size", Type::Size},
+            {"timeout", Type::Time},
+            {"cgi_timeout", Type::Time},
+            {"cgi_idle_timeout", Type::Time},
+            {"location", Type::Block}
         }
     },
     {LOCATION, 
         {
-            {"root", PATH},
-            {"autoindex", BOOLEAN},
-            {"botdetect", YESNO},
-            {"index", FILENAME},
-            {"allow_methods", METH},
-            {"upload_path", PATH},
-            {"cgi_extension", CGI_EXT},
-            {"cgi_path", PATH},
-            {"client_max_body_size", SIZE},
-            {"return", REDIRECT}
+            {"root", Type::Path},
+            {"autoindex", Type::Boolean},
+            {"botdetect", Type::YesNo},
+            {"index", Type::Filename},
+            {"allow_methods", Type::Method},
+            {"upload_path", Type::Path},
+            {"cgi_extension", Type::CgiExtension},
+            {"cgi_path", Type::Path},
+            {"client_max_body_size", Type::Size},
+            {"return", Type::Redirect}
         }
     }
 };
@@ -51,14 +59,14 @@ bool validateType(Type t, const std::vector<std::string>& value)
         return false;
     switch(t)
     {
-        case METH:
+        case Type::Method:
             for (size_t i = 0; i < value.size(); i++)
             {
                 if (!isMethod(value[i]))
                     return false;
             }
                 return true;
-        case DOMAIN:
+        case Type::Domain:
             for (size_t i = 0; i < value.size(); i++)
             {
                 if (value[i] == "_")
@@ -67,21 +75,21 @@ bool validateType(Type t, const std::vector<std::string>& value)
                     return false;
             }
                 return true;
-        case FILENAME:
+        case Type::Filename:
             for (size_t i = 0; i < value.size(); i++)
             {
                 if (!isFilename(value[i]))
                     return false;
             }
                 return true;
-        case CGI_EXT:
+        case Type::CgiExtension:
             for (size_t i = 0; i < value.size(); i++)
             {
                 if (value[i] != ".py" && value[i] != ".php" && value[i] != ".sh")
                     return false;
             }
                 return true;
-        case MAP:
+        case Type::Map:
             if (value.size() != 2)
                 return false;
             for (size_t i = 0; i < value.size() - 1; i++)
@@ -92,7 +100,7 @@ bool validateType(Type t, const std::vector<std::string>& value)
                     return false;
             }
             return isPath(value.back());
-        case REDIRECT:
+        case Type::Redirect:
             return isRedirect(value);
         default:
             return false;
@@ -103,17 +111,17 @@ bool validateType(Type t, const std::string& value)
 {
     switch (t) 
     {
-        case PORT:
+        case Type::Port:
             return isListen(value);
-        case PATH:
+        case Type::Path:
             return isPath(value);
-        case BOOLEAN:
+        case Type::Boolean:
             return isBoolean(value);
-        case SIZE:
+        case Type::Size:
             return isSize(value);
-        case TIME:
+        case Type::Time:
             return isTime(value);
-        case YESNO:
+        case Type::YesNo:
             return isYesNo(value);
         default:
             return false;

@@ -84,7 +84,7 @@ void ConfigParser::parseLocation(const std::vector<std::string>& tokens, size_t&
             Type t = grammar.at(LOCATION).at(key);
             i++;
 
-            if (t == FILENAME || t == METH || t == CGI_EXT || t == REDIRECT)
+            if (t == Type::Filename || t == Type::Method || t == Type::CgiExtension || t == Type::Redirect)
             {
                 std::vector<std::string> values;
                 while (i < tokens.size() && tokens[i] != ";")

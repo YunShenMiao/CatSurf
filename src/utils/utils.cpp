@@ -1,20 +1,41 @@
 #include "../../include/utils.hpp"
 #include "../../include/statusCodes.hpp"
+#include "../../include/platform.hpp"
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
-#include <sys/stat.h>
+#include <sstream>
 #include <limits.h>
 #include <filesystem>
 #include <ctime>
 #include <algorithm>
 #include <map>
 
+std::string toNativePath(const std::string& path)
+{
+    if (path.empty())
+        return path;
+#ifdef _WIN32
+    std::filesystem::path p(path);
+    p = p.make_preferred();
+    return p.string();
+#else
+    return path;
+#endif
+}
+
 std::string addBackSlash(std::string path)
 {
-    if (path.back() != '/')
-        path += '/';
-    return path;
+    if (path.empty())
+        return path;
+    std::filesystem::path p(path);
+    p = p.lexically_normal();
+    std::string normalized = p.make_preferred().string();
+    if (normalized.empty())
+        return normalized;
+    if (normalized.back() != std::filesystem::path::preferred_separator)
+        normalized += std::filesystem::path::preferred_separator;
+    return normalized;
 }
 
 std::string generateFilename()
@@ -101,7 +122,8 @@ std::string getMime(std::string path)
     if (dot == std::string::npos)
         return "application/octet-stream";
     std::string key = path.substr(dot + 1);
-    std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+    std::transform(key.begin(), key.end(), key.begin(), 
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
     auto it = mimeTypes.find(key);
     if (it != mimeTypes.end())
@@ -113,7 +135,7 @@ std::string getMime(std::string path)
 std::string str_tolower(std::string s)
 {
     std::transform(s.begin(), s.end(), s.begin(),
-        [](unsigned char c) { return std::tolower(c); });
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
 
@@ -130,8 +152,13 @@ bool isWithinFSRoot(const std::string& full_path, const std::string& allowed_roo
         if (full_str == root_str)
             return true;
 
-        if (!root_str.empty() && root_str.back() != '/')
-            root_str += '/';
+#ifdef _WIN32
+        constexpr char separator = '\\';
+#else
+        constexpr char separator = '/';
+#endif
+        if (!root_str.empty() && root_str.back() != separator)
+            root_str += separator;
 
         return full_str.compare(0, root_str.size(), root_str) == 0;
     }
@@ -164,7 +191,11 @@ std::string httpDate()
     std::time_t now = std::time(NULL);
 
     std::tm gmt;
+#ifdef _WIN32
+    gmtime_s(&gmt, &now);
+#else
     gmt = *std::gmtime(&now);
+#endif
 
     char buffer[64];
     std::strftime(buffer, sizeof(buffer), "%a, %d %b %Y %H:%M:%S GMT", &gmt);
@@ -232,10 +263,10 @@ bool isDefaultEP(int status)
 
 bool isDirectory(const std::string& path)
 {
-    struct stat st;
-    if (stat(path.c_str(), &st) != 0)
+    platform::native_stat st{};
+    if (!platform::stat_path(path, st))
         return false;
-    return S_ISDIR(st.st_mode);
+    return platform::is_directory(st);
 }
 
 std::string resolveConfigPath(const std::string& path)
@@ -248,7 +279,7 @@ std::string resolveConfigPath(const std::string& path)
         p = std::filesystem::current_path() / p;
     p = p.lexically_normal();
 
-    return p.string();
+    return toNativePath(p.string());
 }
 
 
@@ -299,7 +330,7 @@ bool isPort(const std::string& str)
         int a = std::stoi(str);
         return a > 1 && a < 65535;
     }
-    catch (const std::exception& e)
+    catch (const std::exception&)
     {
         return false;
     }

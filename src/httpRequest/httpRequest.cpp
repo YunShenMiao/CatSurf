@@ -38,7 +38,7 @@ attack, such as an excessive number of open connections from a single client.
  //last activity on recv -> HEADER_TIMEOUT     5–10 seconds BODY_TIMEOUT 10–30 seconds  KEEPALIVE_TIMEOUT  10–60 seconds
 
 
-HttpRequest::HttpRequest (): content_length(0), error_code(0), is_complete(false), state(REQUEST_LINE), chunked(false), MPFlag(false){}
+HttpRequest::HttpRequest (): content_length(0), error_code(0), is_complete(false), state(ParseState::RequestLine), chunked(false), MPFlag(false){}
 
 HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), query(other.query), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length), error_code(other.error_code), error_info(other.error_info), is_complete(other.is_complete), state(other.state), chunked(other.chunked), MPFlag(other.MPFlag) {}
 
@@ -153,7 +153,7 @@ void HttpRequest::setError(ErrorCode type, std::string info)
 {
     error_code = type;
     error_info = info;
-    state = ERROR;
+    state = ParseState::Error;
     throw std::runtime_error(info);
 }
 
@@ -176,7 +176,7 @@ void HttpRequest::clear()
     error_info.clear();
     is_complete = false;
     chunked = false;
-    state = REQUEST_LINE;
+    state = ParseState::RequestLine;
 }
 
 /***********************************************************/
@@ -435,9 +435,9 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
               << " buffer_size=" << buffer.size() << "\n";
 #endif
 
-    while (state != COMPLETE && state != ERROR)
+    while (state != ParseState::Complete && state != ParseState::Error)
     {
-        if (state == REQUEST_LINE) 
+        if (state == ParseState::RequestLine) 
         {
             if (buffer.size() > MAX_REQUEST_LINE)
             {
@@ -462,7 +462,7 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                           << " query=" << query << "\n";
 #endif
                 buffer.erase(0, pos + 2);
-                state = HEADERS;
+                state = ParseState::Headers;
             }
             catch (std::exception& e)
             {
@@ -472,7 +472,7 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 return state;
             }
         }
-        else if (state == HEADERS) 
+        else if (state == ParseState::Headers) 
         {
             if (buffer.size() > MAX_HEADER_SIZE)
             {
@@ -495,9 +495,9 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
 #endif
                 buffer.erase(0, pos + 4);
                 if (content_length == 0 && !chunked)
-                    state = COMPLETE;
+                    state = ParseState::Complete;
                 else
-                        state = BODY;
+                        state = ParseState::Body;
             }
             catch (std::exception &e)
             {
@@ -507,13 +507,13 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 return state;
             } 
         }
-        else if (state == BODY)
+        else if (state == ParseState::Body)
         {
             auto fail_body = [&](ErrorCode code, const std::string& info) -> ParseState
             {
                 error_code = code;
                 error_info = info;
-                state = ERROR;
+                state = ParseState::Error;
                 return state;
             };
 
@@ -550,7 +550,7 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                         if (buffer.compare(line_end + 2, 2, "\r\n") != 0)
                             return fail_body(BadRequest, "Invalid chunk terminator");
                         buffer.erase(0, line_end + 4);
-                        state = COMPLETE;
+                        state = ParseState::Complete;
                         return state;
                     }
 
@@ -576,7 +576,7 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
 
             body = buffer.substr(0, content_length);
             buffer.erase(0, content_length);
-            state = COMPLETE;
+            state = ParseState::Complete;
             return state;
         }
     }

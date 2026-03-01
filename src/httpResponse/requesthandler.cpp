@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <cstdio>
+#include <sstream>
 
 RequestHandler::RequestHandler(const Route &r, const parsedRequest &pr, const ServerConfig &sc, bool keep_alive): r(r), pr(pr), sc(sc) 
 {
@@ -114,10 +115,13 @@ HttpResponse RequestHandler::deleteFile()
         uploadPath += '/';
 
         std::string fullPath = uploadPath + fileName;
-        if (!isWithinFSRoot(fullPath, uploadPath))
+        fullPath = toNativePath(fullPath);
+        std::string uploadRoot = uploadPath;
+
+        if (!isWithinFSRoot(fullPath, uploadRoot))
             return handleError(Forbidden);
 
-        if (remove(fullPath.c_str()) != 0)
+        if (std::remove(fullPath.c_str()) != 0)
         {
             if (errno == ENOENT)
                 return handleError(NotFound);
@@ -216,6 +220,7 @@ HttpResponse RequestHandler::handleError(int status)
         if (errorPagePath.back() != '/')
             errorPagePath += '/';
         errorPagePath += it->second;
+        errorPagePath = toNativePath(errorPagePath);
 
         if (isWithinFSRoot(errorPagePath, sc.root))
         {
@@ -253,7 +258,7 @@ HttpResponse RequestHandler::handleError(int status)
 
 bool readFile(const std::string& filepath, std::string& body)
 {
-    std::ifstream file(filepath, std::ios::binary);
+    std::ifstream file(toNativePath(filepath), std::ios::binary);
     if (!file.is_open())
         return false;
 

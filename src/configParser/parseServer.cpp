@@ -3,7 +3,15 @@
 #include "../../include/utils.hpp"
 #include <set>
 #include <stdexcept>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
+#endif
 
 void ConfigParser::setServerDirective(const std::string& key, const std::string& value, Type t, ServerConfig& serv)
 {
@@ -112,7 +120,7 @@ void ConfigParser::parseServer(const std::vector<std::string>& tokens, size_t& i
         {
             Type t = grammar.at(SERVER).at(key);
 
-            if (t == DOMAIN|| t == FILENAME || t == MAP)
+            if (t == Type::Domain || t == Type::Filename || t == Type::Map)
             {
                 std::vector<std::string> values;
                 i++;

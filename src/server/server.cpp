@@ -3,21 +3,31 @@
 #include <stdexcept>
 #include <limits>
 #include <cerrno>
+#include <sstream>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <sstream>
+#endif
 
 #include "../../include/server.hpp"
 #include "../../include/router.hpp"
 #include "../../include/requestHandler.hpp"
 #include "../../include/httpResponse.hpp"
 #include "../../include/utils.hpp"
+#include "../../include/platform.hpp"
 
 namespace
 {
@@ -62,11 +72,12 @@ Server::~Server()
 {
     if (cgi_manager)
         cgi_manager->shutdown();
+#ifndef _WIN32
     if (signal_pipe_initialized)
     {
         poller->remove(signal_pipe[0]);
-        close(signal_pipe[0]);
-        close(signal_pipe[1]);
+        platform::close_fd(signal_pipe[0]);
+        platform::close_fd(signal_pipe[1]);
         signal_pipe_initialized = false;
         struct sigaction sa{};
         sa.sa_handler = SIG_DFL;
@@ -74,6 +85,7 @@ Server::~Server()
         sa.sa_flags = 0;
         sigaction(SIGCHLD, &sa, nullptr);
     }
+#endif
     if (active_instance == this)
         active_instance = nullptr;
 }
@@ -225,7 +237,7 @@ void Server::close_client(int client_fd)
     if (it->second.upload_active)
     {
         it->second.upload_file.close();
-        unlink(it->second.upload_path.c_str());
+        platform::unlink_file(it->second.upload_path);
     }
 
     reset_static_file_stream(it->second);
@@ -250,7 +262,7 @@ bool Server::write_body(ClientCon& conn, const std::string& str, size_t len)
     {
         fallback_error(conn, PayloadTooLarge);
         conn.upload_file.close();
-        unlink(conn.upload_path.c_str());
+        platform::unlink_file(conn.upload_path);
         return false;
     }
 
@@ -259,7 +271,7 @@ bool Server::write_body(ClientCon& conn, const std::string& str, size_t len)
     if (!conn.upload_file.good())
     {
         conn.upload_file.close();
-        unlink(conn.upload_path.c_str());
+        platform::unlink_file(conn.upload_path);
         fallback_error(conn, InternalServerError);
         return false;
     }
@@ -274,10 +286,10 @@ bool Server::processBody(ClientCon &conn, const std::string &str, ParseState *st
     if (conn.chunked)
     {
         std::string processed = processChunkedBody(conn, str, *state);
-        if (*state == ERROR)
+        if (*state == ParseState::Error)
         {
             conn.upload_file.close();
-            unlink(conn.upload_path.c_str());
+            platform::unlink_file(conn.upload_path);
             return false;
         }
         if (conn.MPFlag)
@@ -332,18 +344,18 @@ void Server::read_client(int client_fd)
     size_t to_write = 0;
     if (conn.upload_active)
     {
-        ParseState state = BODY;
+        ParseState state = ParseState::Body;
         std::string str(buffer.data(), bytes);
         if (!processBody(conn, str, &state, &to_write))
             return;
 
-        if (conn.upload_bytes_remaining == 0 || state == COMPLETE || conn.multipart_state == MP_END)
+        if (conn.upload_bytes_remaining == 0 || state == ParseState::Complete || conn.multipart_state == MP_END)
             uploadComplete(conn);
     }
     if (static_cast<size_t>(bytes) > to_write)
     {
         ParseState state = conn.req.parseRequest(buffer.data() + to_write, bytes - to_write);
-        if (state == ERROR)
+        if (state == ParseState::Error)
         {
             int status = conn.req.getRequest().error_code;
             if (status <= 0) status = 400;
@@ -351,10 +363,10 @@ void Server::read_client(int client_fd)
             return;
         }
 
-        if (state == REQUEST_LINE || state == HEADERS)
+        if (state == ParseState::RequestLine || state == ParseState::Headers)
             return;
 
-        if (state == BODY || state == COMPLETE)
+        if (state == ParseState::Body || state == ParseState::Complete)
         {
             std::string host = conn.req.getHeaderVal("host");
             conn.servConf = findServer(conn.ip, conn.port, host);
@@ -364,7 +376,7 @@ void Server::read_client(int client_fd)
                 return;
             }
 
-            if (state == BODY)
+            if (state == ParseState::Body)
             {
                 parsedRequest req = conn.req.getRequest();
                 Router r(*conn.servConf, req);
@@ -376,7 +388,7 @@ void Server::read_client(int client_fd)
 
             process_request(conn);
 
-            if (conn.keep_alive && state == COMPLETE)
+            if (conn.keep_alive && state == ParseState::Complete)
                 conn.req.clear();
 
             #ifdef DEBUG
@@ -716,34 +728,30 @@ bool Server::start_static_file_stream(ClientCon& conn, const Route& route, const
         conn.res_ready = true;
     };
 
-    int open_flags = O_RDONLY;
-#ifdef O_CLOEXEC
-    open_flags |= O_CLOEXEC;
-#endif
-    int fd = open(route.file_path.c_str(), open_flags);
+    int fd = platform::open_readonly(route.file_path);
     if (fd < 0)
     {
         queue_error(map_static_open_errno_to_status(errno));
         return false;
     }
 
-    struct stat st{};
-    if (fstat(fd, &st) != 0)
+    platform::native_stat st{};
+    if (!platform::fstat_fd(fd, st))
     {
         int status = (errno == EACCES) ? Forbidden : InternalServerError;
-        close(fd);
+        platform::close_fd(fd);
         queue_error(status);
         return false;
     }
-    if (!S_ISREG(st.st_mode))
+    if (!platform::is_regular(st))
     {
-        close(fd);
+        platform::close_fd(fd);
         queue_error(Forbidden);
         return false;
     }
     if (st.st_size < 0)
     {
-        close(fd);
+        platform::close_fd(fd);
         queue_error(InternalServerError);
         return false;
     }
@@ -751,7 +759,7 @@ bool Server::start_static_file_stream(ClientCon& conn, const Route& route, const
     unsigned long long file_size = static_cast<unsigned long long>(st.st_size);
     if (file_size > static_cast<unsigned long long>(std::numeric_limits<size_t>::max()))
     {
-        close(fd);
+        platform::close_fd(fd);
         queue_error(InternalServerError);
         return false;
     }
@@ -792,7 +800,7 @@ bool Server::write_static_file_chunk(ClientCon& conn)
         if (to_read > conn.file_bytes_remaining)
             to_read = conn.file_bytes_remaining;
 
-        ssize_t read_bytes = read(conn.file_fd, conn.file_buf.data(), to_read);
+        ssize_t read_bytes = platform::read_fd(conn.file_fd, conn.file_buf.data(), to_read);
         if (read_bytes < 0)
         {
             close_client(conn.fd);
@@ -832,7 +840,7 @@ bool Server::write_static_file_chunk(ClientCon& conn)
 void Server::reset_static_file_stream(ClientCon& conn)
 {
     if (conn.file_fd >= 0)
-        close(conn.file_fd);
+        platform::close_fd(conn.file_fd);
     conn.file_fd = -1;
     conn.file_stream_active = false;
     conn.file_bytes_remaining = 0;
@@ -993,7 +1001,7 @@ void Server::startUpload(ClientCon& conn, const Route& route, const parsedReques
             return;
     }
     conn.upload_bytes_remaining = req.content_length;
-    ParseState state = BODY;
+    ParseState state = ParseState::Body;
     if (!req.body.empty())
     {
         if (req.chunked)
@@ -1006,7 +1014,7 @@ void Server::startUpload(ClientCon& conn, const Route& route, const parsedReques
 
     if (!conn.chunked && conn.upload_bytes_remaining == 0)
         uploadComplete(conn);
-    else if (state == COMPLETE || conn.multipart_state == MP_END)
+    else if (state == ParseState::Complete || conn.multipart_state == MP_END)
         uploadComplete(conn); 
     else
         conn.upload_active = true;
@@ -1015,7 +1023,7 @@ void Server::startUpload(ClientCon& conn, const Route& route, const parsedReques
 std::string Server::processChunkedBody(ClientCon& conn, std::string buffer, ParseState& state)
 {
     std::string decoded;
-    state = BODY;
+    state = ParseState::Body;
     
     size_t crlf = buffer.find("\r\n");
     if (crlf == std::string::npos)
@@ -1030,7 +1038,7 @@ std::string Server::processChunkedBody(ClientCon& conn, std::string buffer, Pars
     catch (std::exception &e)
     {
         fallback_error(conn, BadRequest);
-        state = ERROR;
+        state = ParseState::Error;
         return decoded;
     }
     if (chunk_size == 0)
@@ -1038,7 +1046,7 @@ std::string Server::processChunkedBody(ClientCon& conn, std::string buffer, Pars
     if (buffer.size() < crlf + 4)
         return decoded;
     buffer.erase(0, crlf + 4);
-    state = COMPLETE;
+    state = ParseState::Complete;
     return decoded;
     }
 
@@ -1046,13 +1054,13 @@ std::string Server::processChunkedBody(ClientCon& conn, std::string buffer, Pars
         return decoded;
     if (buffer[crlf + 2 + chunk_size] != '\r' || buffer[crlf + 2 + chunk_size + 1] != '\n')
     {
-        state = ERROR;
+        state = ParseState::Error;
         fallback_error(conn, BadRequest);
         return "";
     }
     if (conn.uploaded_bytes + chunk_size > MAX_CONT_LEN)
     {
-        state = ERROR; 
+        state = ParseState::Error; 
         fallback_error(conn, PayloadTooLarge);
         return "";
     }
@@ -1105,6 +1113,10 @@ void Server::bind_and_listen(int fd, uint16_t port, uint32_t ip)
 
 void Server::setup_signal_pipe()
 {
+#ifdef _WIN32
+    signal_pipe_initialized = false;
+    return;
+#else
     if (signal_pipe_initialized)
         return;
 
@@ -1116,8 +1128,8 @@ void Server::setup_signal_pipe()
         int flags = fcntl(signal_pipe[i], F_GETFL, 0);
         if (flags == -1 || fcntl(signal_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1)
         {
-            close(signal_pipe[0]);
-            close(signal_pipe[1]);
+            platform::close_fd(signal_pipe[0]);
+            platform::close_fd(signal_pipe[1]);
             throw std::runtime_error("Failed to configure signal pipe");
         }
     }
@@ -1132,15 +1144,17 @@ void Server::setup_signal_pipe()
     if (sigaction(SIGCHLD, &sa, nullptr) != 0)
     {
         poller->remove(signal_pipe[0]);
-        close(signal_pipe[0]);
-        close(signal_pipe[1]);
+        platform::close_fd(signal_pipe[0]);
+        platform::close_fd(signal_pipe[1]);
         signal_pipe_initialized = false;
         throw std::runtime_error("Failed to install SIGCHLD handler");
     }
+#endif
 }
 
 void Server::sigchld_handler(int)
 {
+#ifndef _WIN32
     if (!active_instance || !active_instance->signal_pipe_initialized)
         return;
     char byte = 1;
@@ -1150,10 +1164,14 @@ void Server::sigchld_handler(int)
     if (r == 0)
         return;
     return;
+#endif
 }
 
 void Server::handle_signal_pipe()
 {
+#ifdef _WIN32
+    (void)signal_pipe_initialized;
+#else
     if (!signal_pipe_initialized)
         return;
 
@@ -1165,6 +1183,7 @@ void Server::handle_signal_pipe()
             break;
     }
     reap_children();
+#endif
 }
 
 /*************************************************************************/
@@ -1173,6 +1192,9 @@ void Server::handle_signal_pipe()
 
 void Server::reap_children()
 {
+#ifdef _WIN32
+    (void)cgi_manager;
+#else
     if (!cgi_manager)
         return;
 
@@ -1180,6 +1202,7 @@ void Server::reap_children()
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
         cgi_manager->handleChildExit(pid, status);
+#endif
 }
 
 bool Server::dispatch_cgi_event(const event::PollEvent& ev)

@@ -63,22 +63,22 @@ struct ServerConfig
 /*                       ENUM                              */
 /***********************************************************/
 
-enum Type
+enum class Type
 {
-    PORT,
-    WORK_PRC,
-    PATH,
-    BOOLEAN,
-    FILENAME,
-    DOMAIN,
-    MAP,
-    BLOCK,
-    SIZE,
-    REDIRECT,
-    TIME,
-    CGI_EXT,
-    METH,
-    YESNO
+    Port,
+    WorkProcess,
+    Path,
+    Boolean,
+    Filename,
+    Domain,
+    Map,
+    Block,
+    Size,
+    Redirect,
+    Time,
+    CgiExtension,
+    Method,
+    YesNo
 };
 
 enum Block

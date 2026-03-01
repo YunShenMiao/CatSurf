@@ -12,7 +12,7 @@
 #define MAX_URI 8000
 #define MAX_CONT_LEN 1058576000 // ~1GB
 
-enum ParseState {REQUEST_LINE, HEADERS, BODY, COMPLETE, ERROR};
+enum class ParseState { RequestLine, Headers, Body, Complete, Error };
 
 struct parsedRequest
 {

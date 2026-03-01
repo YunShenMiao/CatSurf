@@ -3,10 +3,10 @@
 #include "../../include/httpRequest.hpp"
 #include "../../include/server.hpp"
 #include "../../include/utils.hpp"
-#include <iostream>
-#include <sys/stat.h>
+#include "../../include/platform.hpp"
 #include <algorithm>
 #include <filesystem>
+#include <iostream>
 
 Router::Router(const ServerConfig& server, const parsedRequest &req): server(server), req(req) {}
 
@@ -131,18 +131,17 @@ Route Router::route()
             return result;
         }
 
-		struct stat st;
-        if (stat(result.file_path.c_str(), &st) != 0)
+        platform::native_stat st{};
+        if (!platform::stat_path(result.file_path, st))
         {
             if (loc && resolveCgiPathInfo(loc, safe_uri ))
                 return result;
             result.type = ERR;
             result.status = NotFound;
         }
-        else if (S_ISDIR(st.st_mode))
+        else if (platform::is_directory(st))
         {
             std::string index_path = mapIndexPath(result.file_path, loc);
-            std::cout << index_path << std::endl;
         
             if (!index_path.empty())
             {
@@ -185,12 +184,11 @@ Route Router::route()
             }
             else
             {
-                std::cout << "entered\n" << std::endl;
                 result.type = ERR;
                 result.status = Forbidden;
             }
         }
-        else if (S_ISREG(st.st_mode))
+        else if (platform::is_regular(st))
         {
             if (isCGI(loc, result.file_path))
             {
@@ -230,8 +228,8 @@ std::string Router::mapIndexPath(const std::string& dir, const LocationConfig* l
             res += '/';
         res += idx;
 
-        struct stat st;
-        if (stat(res.c_str(), &st) == 0 && S_ISREG(st.st_mode))
+        platform::native_stat st{};
+        if (platform::stat_path(res, st) && platform::is_regular(st))
             return res;
     }
 
@@ -241,14 +239,16 @@ std::string Router::mapIndexPath(const std::string& dir, const LocationConfig* l
 
 std::string Router::mapURI(const LocationConfig *loc, const std::string &uri)
 {
-    std::string root;
+    std::string root_str;
     if (loc && !loc->root.empty())
-        root = loc->root;
+        root_str = loc->root;
     else
-        root = server.root;
+        root_str = server.root;
+    if (root_str.empty())
+        return "";
 
-    if (!root.empty() && root.back() != '/')
-        root += '/';
+    std::filesystem::path root_path(root_str);
+    root_path = root_path.lexically_normal();
     
     std::string relative_path = uri;
 
@@ -260,16 +260,13 @@ std::string Router::mapURI(const LocationConfig *loc, const std::string &uri)
     if (!relative_path.empty() && relative_path[0] == '/')
         relative_path = relative_path.substr(1);
 
-    std::string full_path = normalizePath(root + relative_path);
-    /*  std::filesystem::path fp = std::filesystem::weakly_canonical(root + relative_path);
-    std::string full_path = fp.string(); */
-
-    std::cout << root << std::endl;
-    std::cout << full_path << std::endl;
-
-    if (!isWithinFSRoot(full_path, root))
+    std::filesystem::path combined = root_path / relative_path;
+    combined = combined.lexically_normal();
+    std::string full_path = toNativePath(combined.string());
+    std::string fs_root = toNativePath(root_path.string());
+    
+    if (!isWithinFSRoot(full_path, fs_root))
         return "";
-    std::cout << full_path << std::endl;
     return full_path;
 }
 
@@ -374,8 +371,8 @@ bool Router::resolveCgiPathInfo(const LocationConfig* loc, const std::string& sa
         std::string mapped = mapURI(loc, candidate);
         if (!mapped.empty())
         {
-            struct stat st;
-            if (stat(mapped.c_str(), &st) == 0 && S_ISREG(st.st_mode))
+            platform::native_stat st{};
+            if (platform::stat_path(mapped, st) && platform::is_regular(st))
             {
                 if (isCGI(loc, mapped))
                 {

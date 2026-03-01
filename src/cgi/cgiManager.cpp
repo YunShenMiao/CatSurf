@@ -4,18 +4,60 @@
 #include "../../include/utils.hpp"
 
 #include <algorithm>
-#include <arpa/inet.h>
-#include <csignal>
 #include <cctype>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
 #include <iostream>
 #include <map>
 #include <sstream>
+
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <csignal>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+
+#ifdef _WIN32
+
+struct CgiManager::CgiProcess {};
+
+CgiManager::CgiManager(event::EventPoller& p): poller(p) {}
+
+CgiManager::~CgiManager() = default;
+
+bool CgiManager::launch(const Route& route,
+                        const parsedRequest& request,
+                        ClientCon& client,
+                        const ServerConfig& server)
+{
+    (void)route;
+    (void)request;
+    (void)client;
+    (void)server;
+    return false;
+}
+
+bool CgiManager::handlesFd(int) const
+{
+    return false;
+}
+
+void CgiManager::handleEvent(int, bool, bool) {}
+
+void CgiManager::handleChildExit(pid_t, int) {}
+
+void CgiManager::handleClientClose(int) {}
+
+void CgiManager::notifyClientWritable(int) {}
+
+void CgiManager::checkTimeouts(time_t) {}
+
+void CgiManager::shutdown() {}
+
+#else
 
 namespace
 {
@@ -884,3 +926,5 @@ void CgiManager::enforceBackpressure(CgiProcess& proc)
         poller.update(proc.stdout_fd, false, false);
     }
 }
+
+#endif // _WIN32

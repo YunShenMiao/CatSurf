@@ -21,7 +21,7 @@ int main()
         HttpRequest req;
         ParseState st = req.parseRequest(testRequest.c_str(), testRequest.size());
 
-        if (st == ParseState::COMPLETE)
+        if (st == ParseState::ParseState::Complete)
             req.printRequest();
         else
             std::cerr << RED << "Parser did not finish: state=" << (int)st << RESET << "\n";

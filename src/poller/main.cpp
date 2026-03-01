@@ -178,10 +178,10 @@ int main(int argc, char *argv[])
       }
       catch (std::exception &e)
       {
-        state = ERROR;
+        state = ParseState::Error;
       }
 
-      if (state == COMPLETE)
+      if (state == ParseState::Complete)
       {
         // handle_request(req); actually dont want to always close
 /*         send_response(event.fd);
@@ -190,7 +190,7 @@ int main(int argc, char *argv[])
         requests.erase(event.fd);
         event::close_socket(event.fd); */
       }
-    else if (state == ERROR)
+    else if (state == ParseState::Error)
     {
         // send error response later
         poller->remove(event.fd);
