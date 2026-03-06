@@ -336,7 +336,11 @@ bool CgiManager::launch(const Route& route,
 
     poller.add(proc->stdout_fd, true, false);
     poller.add(proc->stderr_fd, true, false);
-    if (!proc->stdinDone())
+
+    bool expect_more_body = request.chunked || 
+                            (request.content_length > request.body.size());
+    
+    if (!proc->stdinDone() || expect_more_body)
     {
         poller.add(proc->stdin_fd, false, true);
         stdin_map[proc->stdin_fd] = proc.get();
@@ -882,5 +886,44 @@ void CgiManager::enforceBackpressure(CgiProcess& proc)
     {
         proc.pause_stdout = true;
         poller.update(proc.stdout_fd, false, false);
+    }
+}
+
+void CgiManager::feedStdin(int client_fd, const std::string& data)
+{
+    auto it = client_map.find(client_fd);
+    if (it == client_map.end())
+        return;
+    CgiProcess& proc = *it->second;
+    if (proc.stdin_closed || proc.stdin_fd < 0)
+        return;
+
+    proc.stdin_buffer.append(data);
+    proc.last_activity = std::time(nullptr);
+
+    if (stdin_map.find(proc.stdin_fd) != stdin_map.end())
+    {
+        try {
+            poller.update(proc.stdin_fd, false, true);
+        } catch (...) {}
+    }
+}
+
+void CgiManager::finishStdin(int client_fd)
+{
+    auto it = client_map.find(client_fd);
+    if (it == client_map.end())
+        return;
+    CgiProcess& proc = *it->second;
+    if (proc.stdin_closed)
+        return;
+
+    if (proc.stdinDone() && proc.stdin_fd >= 0)
+    {
+        poller.remove(proc.stdin_fd);
+        close(proc.stdin_fd);
+        stdin_map.erase(proc.stdin_fd);
+        proc.stdin_fd = -1;
+        proc.stdin_closed = true;
     }
 }

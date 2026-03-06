@@ -45,6 +45,10 @@ class CgiManager
     void checkTimeouts(time_t now);
     void shutdown();
 
+    // Streaming body support: feeding additional data to the CGI stdin
+    void feedStdin(int client_fd, const std::string& data);
+    void finishStdin(int client_fd);
+
     private:
     struct CgiProcess;
 
