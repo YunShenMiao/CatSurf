@@ -210,6 +210,7 @@ std::string mapStatus(int code)
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
         case 413: return "Payload Too Large";
+        case 414: return "URI Too Long";
         case 429: return "Too Many Requests";
         case 502: return "Bad Gateway";
         case 504: return "Gateway Timeout";

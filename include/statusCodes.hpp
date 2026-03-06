@@ -1,8 +1,6 @@
 #ifndef STATUSCODES_HPP
 #define STATUSCODES_HPP
 
-// optional add: 408 Reruest timeout, 411 length required, 414 uri too long
-// should i change too content too large (newer rfc)
 enum ErrorCode
 {
     BadRequest = 400,
@@ -10,6 +8,7 @@ enum ErrorCode
     NotFound = 404,
     MethodNotAllowed = 405,
     PayloadTooLarge = 413,
+    URITooLong = 414,
     TooManyRequests = 429, // Bot detection rate limit
     InternalServerError = 500,
     NotImplemented = 501,
@@ -22,7 +21,6 @@ enum SuccessCode
 {
     Ok = 200,
     Created = 201,
-/*     Accepted = 202, */
     NoContent = 204
 };
 

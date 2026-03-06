@@ -17,12 +17,6 @@
 #include "botDetection.hpp"
 #include "captchaBypass.hpp"
 
-/* IPv4 = AF_INET (domain)
-TCP = SOCK_STREAM (type)
-protocol = 0;
-port -> serverconfig;
-interface -> get listen from configParserbacklog -> hardcode 128? */
-
 enum MPState {MP_BEGIN, MP_BOUNDARY, MP_HEADER, MP_BODY, MP_END, MP_ERROR};
 
 struct MPBody

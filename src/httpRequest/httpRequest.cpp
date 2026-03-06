@@ -322,6 +322,10 @@ void HttpRequest::parseSL(std::string cont)
     if (end == std::string::npos)
         setError(BadRequest, "Invalid Request line");
     std::string raw_uri = cont.substr(start, end - start);
+    if (raw_uri.size() > MAX_URI)
+        setError(URITooLong, "URI too long");
+    if (cont.size() > MAX_REQUEST_LINE)
+        setError(BadRequest, "invalid or too long request line");
     std::string raw_query;
     size_t qpos = raw_uri.find('?');
     if (qpos != std::string::npos)
@@ -425,7 +429,6 @@ void HttpRequest::check_transfer_enc()
     }
 }
 
-// need to add checks for payload too large, uri too long, request header fields too large
 ParseState HttpRequest::parseRequest(const char* data, size_t len)
 {
     buffer.append(data, len);
@@ -439,11 +442,6 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
     {
         if (state == REQUEST_LINE) 
         {
-            if (buffer.size() > MAX_REQUEST_LINE)
-            {
-                setError(BadRequest, "invalid or too long request line");
-                return state;
-            }
             size_t pos = buffer.find("\r\n");
 #ifdef DEBUG
             std::cout << "[PARSER] request_line_pos="
