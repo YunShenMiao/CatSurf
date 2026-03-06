@@ -521,18 +521,15 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
         }
         else if (state == BODY)
         {
-            auto fail_body = [&](ErrorCode code, const std::string& info) -> ParseState
+/*             auto fail_body = [&](ErrorCode code, const std::string& info) -> ParseState
             {
                 error_code = code;
                 error_info = info;
                 state = ERROR;
                 return state;
-            };
+            }; */
 
-            if (!content_type.empty() && content_type.find("multipart/form-data") != std::string::npos)
-                MPFlag = true;
-
-            if (chunked)
+           /*  if (chunked)
             {
                 while (true)
                 {
@@ -588,9 +585,18 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
 
             body = buffer.substr(0, content_length);
             buffer.erase(0, content_length);
-            state = COMPLETE;
+            state = COMPLETE; */
+            if (!content_type.empty() && content_type.find("multipart/form-data") != std::string::npos)
+                MPFlag = true;
+            if (chunked)
+                body = buffer;
+            else
+            {
+                body = buffer.substr(0, content_length);
+                buffer.erase(0, content_length);
+            }
             return state;
-        }
+            }
     }
     return state;
 }

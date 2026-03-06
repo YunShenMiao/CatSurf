@@ -274,6 +274,7 @@ bool Server::processBody(ClientCon &conn, const std::string &str, ParseState *st
     if (conn.chunked)
     {
         std::string processed = processChunkedBody(conn, str, *state);
+        std::cout << "processed: " << processed << std::endl;
         if (*state == ERROR)
         {
             conn.upload_file.close();
@@ -1015,49 +1016,50 @@ void Server::startUpload(ClientCon& conn, const Route& route, const parsedReques
 std::string Server::processChunkedBody(ClientCon& conn, std::string buffer, ParseState& state)
 {
     std::string decoded;
+    conn.chunk_buf += buffer;
     state = BODY;
-    
-    size_t crlf = buffer.find("\r\n");
-    if (crlf == std::string::npos)
-        return decoded;
 
-    std::string size_str = buffer.substr(0, crlf);
-    size_t chunk_size;
-    try
+    while (true)
     {
-        chunk_size = std::stoul(size_str, nullptr, 16);
-    }
-    catch (std::exception &e)
-    {
-        fallback_error(conn, BadRequest);
-        state = ERROR;
-        return decoded;
-    }
-    if (chunk_size == 0)
-    {
-    if (buffer.size() < crlf + 4)
-        return decoded;
-    buffer.erase(0, crlf + 4);
-    state = COMPLETE;
-    return decoded;
+        size_t crlf = conn.chunk_buf.find("\r\n");
+        if (crlf == std::string::npos)
+            break;
+
+        std::string size_str = conn.chunk_buf.substr(0, crlf);
+        size_t chunk_size = 0;
+        try
+        {
+            chunk_size = std::stoul(size_str, nullptr, 16);
+        }
+        catch (std::exception &e) 
+        { 
+            fallback_error(conn, BadRequest); state = ERROR;
+            return "";
+        }
+
+        if (chunk_size == 0)
+        {
+            if (conn.chunk_buf.size() < crlf + 4)
+                break;
+            conn.chunk_buf.erase(0, crlf + 4);
+            state = COMPLETE;
+            break;
+        }
+
+        if (conn.chunk_buf.size() < crlf + 2 + chunk_size + 2) 
+            break;
+        if (conn.chunk_buf[crlf + 2 + chunk_size] != '\r' || conn.chunk_buf[crlf + 2 + chunk_size + 1] != '\n')
+        {
+            fallback_error(conn, BadRequest);
+            state = ERROR;
+            return "";
+        }
+
+        decoded.append(conn.chunk_buf, crlf + 2, chunk_size);
+        conn.uploaded_bytes += chunk_size;
+        conn.chunk_buf.erase(0, crlf + 2 + chunk_size + 2);
     }
 
-    if (buffer.size() < crlf + 2 + chunk_size + 2)
-        return decoded;
-    if (buffer[crlf + 2 + chunk_size] != '\r' || buffer[crlf + 2 + chunk_size + 1] != '\n')
-    {
-        state = ERROR;
-        fallback_error(conn, BadRequest);
-        return "";
-    }
-    if (conn.uploaded_bytes + chunk_size > MAX_CONT_LEN)
-    {
-        state = ERROR; 
-        fallback_error(conn, PayloadTooLarge);
-        return "";
-    }
-    decoded.append(buffer, crlf + 2, chunk_size);
-    buffer.erase(0, crlf + 2 + chunk_size + 2);
     return decoded;
 }
 

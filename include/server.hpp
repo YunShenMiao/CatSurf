@@ -76,6 +76,7 @@ struct ClientCon
     MPState multipart_state = MP_BOUNDARY;
     int MPCount = 0;
     std::string upload_path;
+    std::string chunk_buf;
     size_t upload_bytes_remaining = 0;
     size_t uploaded_bytes = 0;
     bool chunked = false;
