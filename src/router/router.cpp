@@ -143,7 +143,7 @@ Route Router::route()
         {
             std::string index_path = mapIndexPath(result.file_path, loc);
             std::cout << index_path << std::endl;
-        
+
             if (!index_path.empty())
             {
                 result.file_path = index_path;
@@ -185,7 +185,6 @@ Route Router::route()
             }
             else
             {
-                std::cout << "entered\n" << std::endl;
                 result.type = ERR;
                 result.status = Forbidden;
             }
@@ -264,12 +263,9 @@ std::string Router::mapURI(const LocationConfig *loc, const std::string &uri)
     /*  std::filesystem::path fp = std::filesystem::weakly_canonical(root + relative_path);
     std::string full_path = fp.string(); */
 
-    std::cout << root << std::endl;
-    std::cout << full_path << std::endl;
 
     if (!isWithinFSRoot(full_path, root))
         return "";
-    std::cout << full_path << std::endl;
     return full_path;
 }
 

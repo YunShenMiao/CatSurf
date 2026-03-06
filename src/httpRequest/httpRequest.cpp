@@ -432,41 +432,21 @@ void HttpRequest::check_transfer_enc()
 ParseState HttpRequest::parseRequest(const char* data, size_t len)
 {
     buffer.append(data, len);
-
-#ifdef DEBUG
-    std::cout << "[PARSER] state=" << state
-              << " buffer_size=" << buffer.size() << "\n";
-#endif
-
     while (state != COMPLETE && state != ERROR)
     {
         if (state == REQUEST_LINE) 
         {
             size_t pos = buffer.find("\r\n");
-#ifdef DEBUG
-            std::cout << "[PARSER] request_line_pos="
-                      << (pos == std::string::npos ? -1 : static_cast<int>(pos))
-                      << "\n";
-#endif
             if (pos == std::string::npos)
                 return state;
             try
             {
                 parseSL(buffer.substr(0, pos));
-#ifdef DEBUG
-                std::cout << "[PARSER] request_line ok method=" << method
-                          << " uri=" << uri
-                          << " http=" << http_v
-                          << " query=" << query << "\n";
-#endif
                 buffer.erase(0, pos + 2);
                 state = HEADERS;
             }
             catch (std::exception& e)
             {
-#ifdef DEBUG
-                std::cout << "[PARSER] request_line exception: " << e.what() << "\n";
-#endif
                 return state;
             }
         }
@@ -490,19 +470,11 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 pos = buffer.find("\r\n\r\n");
                 consumed = 4;
             }
-#ifdef DEBUG
-            std::cout << "[PARSER] headers_pos="
-                      << (pos == std::string::npos ? -1 : static_cast<int>(pos))
-                      << "\n";
-#endif
             if (pos == std::string::npos)
                 return state;
             try
             {
                 parseHeader(buffer.substr(0, pos));
-#ifdef DEBUG
-                std::cout << "[PARSER] headers ok count=" << headers.size() << "\n";
-#endif
                 buffer.erase(0, pos + consumed);
                 if (content_length == 0 && !chunked)
                     state = COMPLETE;
@@ -511,9 +483,6 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
             }
             catch (std::exception &e)
             {
-#ifdef DEBUG
-                std::cout << "[PARSER] headers exception: " << e.what() << "\n";
-#endif
                 return state;
             } 
         }

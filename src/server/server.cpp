@@ -201,9 +201,6 @@ void Server::check_timeouts()
 
         if (now - conn.last_act > timeout)
         {
-            #ifdef DEBUG
-            std::cout << "\nClient " << fd << " timed out\n";
-            #endif
             conn.req = HttpRequest();
             to_close.push_back(fd);
         }
@@ -274,7 +271,6 @@ bool Server::processBody(ClientCon &conn, const std::string &str, ParseState *st
     if (conn.chunked)
     {
         std::string processed = processChunkedBody(conn, str, *state);
-        std::cout << "processed: " << processed << std::endl;
         if (*state == ERROR)
         {
             conn.upload_file.close();
@@ -324,9 +320,7 @@ void Server::read_client(int client_fd)
 
     if (bytes <= 0)
     {
-    #ifdef DEBUG
-        std::cout << "[READ] fd=" << conn.fd << " recv=" << bytes << " -> closing\n";
-    #endif
+
         close_client(client_fd);
         return;
     }
@@ -413,7 +407,17 @@ void Server::read_client(int client_fd)
                 bool upload_request = (routy.type == UPLOAD && req.method == "POST");
                 bool cgi_request = (routy.type == CGI);
                 if (!upload_request && !cgi_request)
-                    return;
+                {
+                    if (!req.chunked && req.body.size() >= req.content_length)
+                    {
+                        // Body is complete -proceed to process_request
+                    }
+                    else
+                    {
+                        // Still waiting for more body data
+                        return;
+                    }
+                }
             }
 
             process_request(conn);
@@ -421,11 +425,6 @@ void Server::read_client(int client_fd)
             if (conn.keep_alive && state == COMPLETE)
                 conn.req.clear();
 
-            #ifdef DEBUG
-                std::cout << "[READ] fd=" << conn.fd
-              << " state=" << state
-              << " uri=" << conn.req.getUri() << "\n";
-            #endif
         }
     }
 }
@@ -527,12 +526,6 @@ void Server::process_request(ClientCon& conn)
         return;
     }
 
-#ifdef DEBUG
-    std::cout << "[ROUTE] type=" << static_cast<int>(routy.type)
-              << " uri=" << req.uri
-              << " file=" << routy.file_path << "\n";
-#endif
-
     if (routy.type == UPLOAD && req.method == "POST")
     {
         startUpload(conn, routy, req);
@@ -633,17 +626,6 @@ void Server::client_write(int client_fd)
 
             if (written > 0)
             {
-#ifdef DEBUG
-                std::cout << "[WRITE] fd=" << conn.fd
-                        << " wrote=" << written
-                        << " sent=" << conn.sent + static_cast<size_t>(written)
-                        << " total=" << conn.response_out.size()
-                        << " cgi=" << conn.cgi_active
-                        << " file_stream=" << conn.file_stream_active
-                        << " ka=" << conn.keep_alive
-                        << " close_after=" << conn.close_after_send
-                        << "\n";
-#endif
                 conn.sent += static_cast<size_t>(written);
                 conn.last_act = std::time(nullptr);
                 drain_client_backpressure(conn);
@@ -682,13 +664,6 @@ bool Server::finalize_response_write(ClientCon& conn)
 
     if (conn.cgi_active)
     {
-#ifdef DEBUG
-        std::cout << "[WRITE] fd=" << conn.fd
-                  << " CGI response complete"
-                  << " close_after=" << conn.close_after_send
-                  << " force_close=" << conn.cgi_force_close
-                  << " ka=" << conn.keep_alive << "\n";
-#endif
         conn.cgi_active = false;
         if (conn.close_after_send || conn.cgi_force_close || !conn.keep_alive)
         {
@@ -1037,12 +1012,6 @@ void Server::startUpload(ClientCon& conn, const Route& route, const parsedReques
 
 void Server::handleCgiRequest(ClientCon& conn, const Route& route, const parsedRequest& req)
 {
-#ifdef DEBUG
-    std::cout << "[ROUTE] CGI uri=" << req.uri
-              << " query=" << req.query
-              << " script=" << route.script_path
-              << " path_info=" << route.path_info << "\n";
-#endif
 
     // For chunked requests, decode the initial body before launching CGI
     parsedRequest cgi_req = req;
@@ -1061,9 +1030,6 @@ void Server::handleCgiRequest(ClientCon& conn, const Route& route, const parsedR
 
     if (!cgi_manager || !cgi_manager->launch(route, cgi_req, conn, *conn.servConf))
     {
-#ifdef DEBUG
-        std::cout << "[ROUTE] CGI launch failed\n";
-#endif
         fallback_error(conn, BadGateway);
         return;
     }

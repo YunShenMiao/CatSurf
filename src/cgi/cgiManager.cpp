@@ -191,13 +191,6 @@ bool CgiManager::launch(const Route& route,
     if (route.script_path.empty())
         return false;
 
-#ifdef DEBUG
-    std::cerr << "[CGI] launch script=" << route.script_path
-              << " cgi_path=" << route.cgi_path
-              << " uri=" << request.uri
-              << " query=" << request.query << "\n";
-#endif
-
     auto proc = std::make_unique<CgiProcess>(route, request, client, server);
 
     int stdin_pipe[2];
@@ -379,13 +372,6 @@ void CgiManager::handleEvent(int fd, bool readable, bool writable)
         if (readable)
         {
             CgiProcess& proc = *it->second;
-#ifdef DEBUG
-            std::cerr << "[CGI] stdout readable pid=" << proc.pid
-                      << " fd=" << fd
-                      << " headers_complete=" << proc.headers_complete
-                      << " response_started=" << proc.response_started
-                      << " chunked=" << proc.chunked_mode << "\n";
-#endif
             char buffer[4096];
             while (true)
             {
@@ -407,11 +393,6 @@ void CgiManager::handleEvent(int fd, bool readable, bool writable)
                             std::string header_block = proc.header_buffer.substr(0, pos + 2);
                             std::string body = proc.header_buffer.substr(pos + 4);
                             proc.header_buffer.clear();
-#ifdef DEBUG
-                            std::cerr << "[CGI] headers parsed pid=" << proc.pid
-                                      << " header_bytes=" << header_block.size()
-                                      << " initial_body_bytes=" << body.size() << "\n";
-#endif
                             bool ok = true;
                             std::istringstream iss(header_block);
                             std::string line;
@@ -448,11 +429,6 @@ void CgiManager::handleEvent(int fd, bool readable, bool writable)
                 }
                 else if (n == 0)
                 {
-#ifdef DEBUG
-                    std::cerr << "[CGI] stdout EOF pid=" << proc.pid
-                              << " headers_complete=" << proc.headers_complete
-                              << " chunked=" << proc.chunked_mode << "\n";
-#endif
                     proc.stdout_closed = true;
                     if (!proc.headers_complete)
                     {
@@ -476,11 +452,6 @@ void CgiManager::handleEvent(int fd, bool readable, bool writable)
     if (in_it != stdin_map.end() && writable)
     {
         CgiProcess& proc = *in_it->second;
-#ifdef DEBUG
-        std::cerr << "[CGI] stdin writable pid=" << proc.pid
-                  << " offset=" << proc.stdin_offset
-                  << " total=" << proc.stdin_buffer.size() << "\n";
-#endif
         if (proc.stdin_fd < 0)
             return;
         if (proc.stdinDone())
@@ -565,12 +536,6 @@ void CgiManager::handleChildExit(pid_t pid, int status)
     if (it == pid_map.end())
         return;
     CgiProcess* proc = it->second;
-#ifdef DEBUG
-    std::cerr << "[CGI] child exit pid=" << pid
-              << " status=" << status
-              << " headers_complete=" << proc->headers_complete
-              << " stdout_closed=" << proc->stdout_closed << "\n";
-#endif
     pid_map.erase(it);
     proc->child_reaped = true;
     if (WIFEXITED(status))
@@ -661,13 +626,6 @@ void CgiManager::cleanupProcess(CgiProcess& proc, CgiTermination reason, int sta
 {
     if (proc.terminated)
         return;
-#ifdef DEBUG
-    std::cerr << "[CGI] cleanup pid=" << proc.pid
-              << " reason=" << static_cast<int>(reason)
-              << " status=" << status_code
-              << " response_started=" << proc.response_started
-              << " headers_complete=" << proc.headers_complete << "\n";
-#endif
     proc.terminated = true;
     proc.pause_stdout = false;
 
@@ -818,13 +776,6 @@ void CgiManager::emitResponse(CgiProcess& proc)
 
     proc.response_started = true;
     std::string head = res.buildResponse();
-#ifdef DEBUG
-    std::cerr << "[CGI] emitResponse pid=" << proc.pid
-              << " status=" << status
-              << " force_close=" << proc.force_close
-              << " has_cl=" << proc.has_content_length
-              << " head_bytes=" << head.size() << "\n";
-#endif
     proc.client->response_out += head;
     proc.client->res_ready = true;
     poller.update(proc.client->fd, false, true);
@@ -834,11 +785,6 @@ void CgiManager::forwardBody(CgiProcess& proc, const std::string& data)
 {
     if (!proc.response_started)
         return;
-#ifdef DEBUG
-    std::cerr << "[CGI] forwardBody pid=" << proc.pid
-              << " bytes=" << data.size()
-              << " chunked=" << proc.chunked_mode << "\n";
-#endif
     proc.last_activity = std::time(nullptr);
     if (proc.chunked_mode)
     {
@@ -862,9 +808,6 @@ void CgiManager::finalizeChunk(CgiProcess& proc)
 {
     if (!proc.response_started || proc.waiting_chunk_terminator)
         return;
-#ifdef DEBUG
-    std::cerr << "[CGI] finalizeChunk pid=" << proc.pid << "\n";
-#endif
     proc.waiting_chunk_terminator = true;
     proc.client->response_out += "0\r\n\r\n";
     proc.client->res_ready = true;
