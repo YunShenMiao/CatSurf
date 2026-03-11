@@ -155,11 +155,11 @@ Example requests:
 - [X] GET/POST requests for each interpreter.
 - [X] PATH_INFO variations (`/script.py/foo/bar`).
 - [X] Chunked request bodies.
-- [ ] Scripts that emit `Status: 404 Something` (verify response line changes).
-- [ ] Scripts that emit `Location: /other` without `Status` (server falls back to 302).
-- [ ] Large POST near `client_max_body_size` (server rejects before spawning CGI).
-- [ X Timeout behavior: script sleeps past `cgi_idle_timeout` and `cgi_timeout`.
-- [ ] Client disconnect mid-stream (`curl ...; kill %curl`) to confirm the CGI is terminated.
+- [X] Scripts that emit `Status: 404 Something` (verify response line changes).
+- [X] Scripts that emit `Location: /other` without `Status` (server falls back to 302).
+- [X] Large POST near `client_max_body_size` (server rejects before spawning CGI).
+- [X] Timeout behavior: script sleeps past `cgi_idle_timeout` and `cgi_timeout`.
+- [X] Client disconnect mid-stream (`curl ...; kill %curl`) to confirm the CGI is terminated.
 - [X] Concurrent CGI requests while static files continue to serve.
 
 Use `config/cgi-demo.conf` together with the scripts in `www/cgi-bin/` for quick verification or adapt the examples to your own interpreters.
