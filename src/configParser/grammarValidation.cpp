@@ -6,7 +6,7 @@
 
 #include "../../include/configParser.hpp"
 #include "../../include/utils.hpp"
-//return redirect catsurf.com -> catsurf.de (fast cgi pass) -> 
+
 const std::map<Block, std::map<std::string, Type>> ConfigParser::grammar =
 {
     {GLOBAL, 
@@ -373,6 +373,6 @@ size_t parseTime(const std::string& str)
         multiplier = 1;
     else if (suffix == "m")
         multiplier = 60 * 1000;
-    // default suffix (or 's') already handled via multiplier default
+
     return base * multiplier;
 }

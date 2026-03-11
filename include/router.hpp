@@ -7,8 +7,6 @@
 #include "configParser.hpp"
 #include "httpRequest.hpp"
 
-// update host and stuff ya
-
 struct ServerConfig;
 
 enum Resource

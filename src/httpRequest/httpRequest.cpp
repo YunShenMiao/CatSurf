@@ -5,39 +5,6 @@
 #include <cctype>
 #include <algorithm>
 
-
-/*
-
-
-2) PREFER TRANSFER OR RESULT IN ERROR?
-TRANSFER ENCODING OVERWRITES CONTENT_LENGTH
---> A server reject a request that contains both Content-Length and Transfer-Encoding or
-process such a request in accordance with the Transfer-Encoding alone. Regardless, the server
-close the connection after responding to such a request to avoid the potential attacks.
-
-3) ERROR CODES
-501 for any transfer coding besides chunked !!!!!!! && http1.0 no transfer coding 
-some error codes returned by parser
-Condition	Parser error_code	Server responds
-Invalid request line	400	400 Bad Request
-Invalid headers	400	400 Bad Request
-Unsupported HTTP version	505	505 HTTP Version Not Supported
-Header fields too large	431	431 Request Header Fields Too Large
-URI too long	414	414 URI Too Long
-Invalid Content-Length	400	400 Bad Request
-Body too large	413	413 Payload Too Large */
-
-/*  
-5) whould we handle? what would be excessive?
-a server might reject traffic that it deems abusive or characteristic of a denial-of-service
-attack, such as an excessive number of open connections from a single client.
- */
-
- // 6) right handling of connection closure 
- // if close from client, also close header in response & then close connection
- //last activity on recv -> HEADER_TIMEOUT     5–10 seconds BODY_TIMEOUT 10–30 seconds  KEEPALIVE_TIMEOUT  10–60 seconds
-
-
 HttpRequest::HttpRequest (): content_length(0), error_code(0), is_complete(false), state(REQUEST_LINE), chunked(false), MPFlag(false){}
 
 HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), query(other.query), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length), error_code(other.error_code), error_info(other.error_info), is_complete(other.is_complete), state(other.state), chunked(other.chunked), MPFlag(other.MPFlag) {}
@@ -116,7 +83,6 @@ parsedRequest HttpRequest::getRequest()
     req.chunked = chunked;
     req.MPFlag = MPFlag;
 
-    // Extract User-Agent header for request fingerprinting
     auto ua_it = headers.find("user-agent");
     if (ua_it != headers.end()) {
         req.user_agent = ua_it->second;
@@ -488,71 +454,6 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
         }
         else if (state == BODY)
         {
-/*             auto fail_body = [&](ErrorCode code, const std::string& info) -> ParseState
-            {
-                error_code = code;
-                error_info = info;
-                state = ERROR;
-                return state;
-            }; */
-
-           /*  if (chunked)
-            {
-                while (true)
-                {
-                    size_t line_end = buffer.find("\r\n");
-                    if (line_end == std::string::npos)
-                        return state;
-
-                    std::string chunk_size_str = buffer.substr(0, line_end);
-                    size_t ext_sep = chunk_size_str.find(';');
-                    if (ext_sep != std::string::npos)
-                        chunk_size_str = chunk_size_str.substr(0, ext_sep);
-
-                    unsigned long long chunk_size = 0;
-                    try
-                    {
-                        chunk_size = std::stoull(chunk_size_str, nullptr, 16);
-                    }
-                    catch (const std::exception&)
-                    {
-                        return fail_body(BadRequest, "Invalid chunk size");
-                    }
-
-                    if (chunk_size == 0)
-                    {
-                        if (buffer.size() < line_end + 4)
-                            return state;
-                        if (buffer.compare(line_end + 2, 2, "\r\n") != 0)
-                            return fail_body(BadRequest, "Invalid chunk terminator");
-                        buffer.erase(0, line_end + 4);
-                        state = COMPLETE;
-                        return state;
-                    }
-
-                    const size_t chunk_len = static_cast<size_t>(chunk_size);
-                    const size_t required = line_end + 2 + chunk_len + 2;
-                    if (buffer.size() < required)
-                        return state;
-                    if (buffer[line_end + 2 + chunk_len] != '\r' || buffer[line_end + 2 + chunk_len + 1] != '\n')
-                        return fail_body(BadRequest, "Invalid chunk terminator");
-                    if (body.size() + chunk_len > MAX_CONT_LEN)
-                        return fail_body(PayloadTooLarge, "Payload too large");
-
-                    body.append(buffer, line_end + 2, chunk_len);
-                    buffer.erase(0, required);
-                }
-            }
-
-            if (buffer.size() < content_length)
-            {
-                body = buffer;
-                return state;
-            }
-
-            body = buffer.substr(0, content_length);
-            buffer.erase(0, content_length);
-            state = COMPLETE; */
             if (!content_type.empty() && content_type.find("multipart/form-data") != std::string::npos)
                 MPFlag = true;
             if (chunked)

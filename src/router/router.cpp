@@ -260,53 +260,11 @@ std::string Router::mapURI(const LocationConfig *loc, const std::string &uri)
         relative_path = relative_path.substr(1);
 
     std::string full_path = normalizePath(root + relative_path);
-    /*  std::filesystem::path fp = std::filesystem::weakly_canonical(root + relative_path);
-    std::string full_path = fp.string(); */
-
 
     if (!isWithinFSRoot(full_path, root))
         return "";
     return full_path;
 }
-
-// Best match: exact match or prefix match with / boundary
-/* const LocationConfig* Router::findLocation(const std::string& uri) const
-{
-	if (server.locations.empty())
-    	return nullptr;
-  
-  	const LocationConfig* best_match = nullptr;
-    size_t best_match_len = 0;
-  
-    for (const auto& loc : server.locations)
-    {
-        // Exakt match
-        if (uri == loc.path)
-        {
-            size_t match_len = loc.path.length();
-            if (match_len > best_match_len)
-            {
-                best_match = &loc;
-                best_match_len = match_len;
-            }
-        }
-        // Prefix match with / boundary (z.b., /error_pages matches or cgi locations)
-        else if (uri.find(loc.path) == 0 && uri.length() > loc.path.length())
-        {
-            // Next character after match must be '/'
-            if (uri[loc.path.length()] == '/')
-            {
-                size_t match_len = loc.path.length();
-                if (match_len > best_match_len)
-                {
-                    best_match = &loc;
-                    best_match_len = match_len;
-                }
-            }
-        }
-    }
-    return best_match;
-} */
 
 const LocationConfig* Router::findLocation(const std::string& uri) const
 {
@@ -318,11 +276,6 @@ const LocationConfig* Router::findLocation(const std::string& uri) const
         const std::string& path = loc.path;
         size_t len = path.length();
 
-/*         if (uri == path)
-        {
-            best = &loc;
-            return best;
-        } */
         if (uri.compare(0, len, path) == 0)
         {
             if ((path.back() == '/') || (uri.length() == len) || (uri[len] == '/'))

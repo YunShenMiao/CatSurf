@@ -391,7 +391,9 @@ void Server::read_client(int client_fd)
 
         if (state == BODY || state == COMPLETE)
         {
+            #ifdef DEBUG
             conn.req.printRequest();
+            #endif
             conn.http_v = conn.req.getRequest().http_v;
             std::string host = conn.req.getHeaderVal("host");
             conn.servConf = findServer(conn.ip, conn.port, host);
@@ -410,15 +412,8 @@ void Server::read_client(int client_fd)
                 bool cgi_request = (routy.type == CGI);
                 if (!upload_request && !cgi_request)
                 {
-                    if (!req.chunked && req.body.size() >= req.content_length)
-                    {
-                        // Body is complete -proceed to process_request
-                    }
-                    else
-                    {
-                        // Still waiting for more body data
+                    if (req.chunked && req.body.size() < req.content_length)
                         return;
-                    }
                 }
             }
 

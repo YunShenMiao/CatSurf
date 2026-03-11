@@ -49,7 +49,6 @@ HttpResponse RequestHandler::handleCGI()
     return res;
 }
 
-//should i use relativ paths in link?
 HttpResponse RequestHandler::handleDirectoryListing()
 {
     std::string body;
@@ -194,8 +193,6 @@ HttpResponse RequestHandler::serveFile()
 
 HttpResponse RequestHandler::handleFiles()
 {
-/*     if (r.type == UPLOAD && pr.method == "POST")
-        return uploadFile(); */
     if (r.type == UPLOAD && pr.method == "DELETE")
         return deleteFile();
     if (!std::filesystem::exists(r.file_path))
