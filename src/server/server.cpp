@@ -664,16 +664,11 @@ bool Server::finalize_response_write(ClientCon& conn)
 {
     conn.res_ready = false;
 
-    if (conn.cgi_active)
+      if (conn.cgi_active)
     {
-        conn.cgi_active = false;
-        if (conn.close_after_send || conn.cgi_force_close || !conn.keep_alive)
-        {
-            conn.close_after_send = false;
-            close_client(conn.fd);
-            return false;
-        }
-        poller->update(conn.fd, true, false);
+        // A drained socket buffer does not mean the CGI response is complete.
+        // Keep reads disabled until the CGI manager finishes the process.
+        poller->update(conn.fd, false, false);
         conn.last_act = std::time(nullptr);
         return true;
     }

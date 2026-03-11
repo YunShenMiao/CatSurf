@@ -635,6 +635,33 @@ void CgiManager::cleanupProcess(CgiProcess& proc, CgiTermination reason, int sta
     pid_t pid = proc.pid;
     ClientCon* client = proc.client;
 
+    // Keep the process object alive until cleanup is fully finished, even
+    // after removing it from the lookup map.
+    std::unique_ptr<CgiProcess> owned_proc;
+    if (stdout_fd >= 0)
+    {
+        std::unordered_map<int, std::unique_ptr<CgiProcess>>::iterator proc_it = processes.find(stdout_fd);
+        if (proc_it != processes.end())
+        {
+            owned_proc = std::move(proc_it->second);
+            processes.erase(proc_it);
+        }
+    }
+    if (!owned_proc)
+    {
+        for (std::unordered_map<int, std::unique_ptr<CgiProcess>>::iterator it = processes.begin();
+             it != processes.end();
+             ++it)
+        {
+            if (it->second.get() == &proc)
+            {
+                owned_proc = std::move(it->second);
+                processes.erase(it);
+                break;
+            }
+        }
+    }
+
     if (stdin_fd >= 0)
         stdin_map.erase(stdin_fd);
     if (stderr_fd >= 0)
@@ -709,20 +736,6 @@ void CgiManager::cleanupProcess(CgiProcess& proc, CgiTermination reason, int sta
         if (!client_gone && client->keep_alive && !client->res_ready && client->response_out.empty())
         {
             poller.update(client->fd, true, false);
-        }
-    }
-
-    if (stdout_fd >= 0)
-        processes.erase(stdout_fd);
-    else
-    {
-        for (auto it = processes.begin(); it != processes.end(); ++it)
-        {
-            if (it->second.get() == &proc)
-            {
-                processes.erase(it);
-                break;
-            }
         }
     }
 }
@@ -800,7 +813,7 @@ void CgiManager::emitResponse(CgiProcess& proc)
 
 void CgiManager::forwardBody(CgiProcess& proc, const std::string& data)
 {
-    if (!proc.response_started)
+    if (!proc.response_started || proc.terminated || proc.client == nullptr)
         return;
     proc.last_activity = std::time(nullptr);
     if (proc.chunked_mode)

@@ -95,6 +95,16 @@ namespace event
     event.events = to_epoll_events(readable, writable);
     if (epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, fd, &event) == -1)
     {
+      // Late MOD calls can race with close/remove paths.
+      if (errno == ENOENT)
+      {
+        if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &event) == 0)
+          return;
+        if (errno == EEXIST)
+          return;
+      }
+      if (errno == EBADF || errno == ENOENT)
+        return;
       throw std::system_error(errno, std::system_category(), system_message("epoll mod"));
     }
   }
@@ -127,7 +137,11 @@ namespace event
     ready.reserve(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i)
     {
-      ready.push_back({events[i].data.fd, (events[i].events & EPOLLIN) != 0, (events[i].events & EPOLLOUT) != 0});
+      const uint32_t event_mask = events[i].events;
+      const bool has_error = (event_mask & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0;
+      ready.push_back({events[i].data.fd,
+                       (event_mask & EPOLLIN) != 0 || has_error,
+                       (event_mask & EPOLLOUT) != 0 || has_error});
     }
     return ready;
   }
@@ -229,8 +243,10 @@ namespace event
     ready.reserve(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i)
     {
-      ready.push_back({static_cast<int>(events[i].ident), events[i].filter == EVFILT_READ,
-                       events[i].filter == EVFILT_WRITE});
+      const bool has_error = (events[i].flags & (EV_EOF | EV_ERROR)) != 0;
+      ready.push_back({static_cast<int>(events[i].ident),
+                       events[i].filter == EVFILT_READ || has_error,
+                       events[i].filter == EVFILT_WRITE || has_error});
     }
     return ready;
   }
@@ -638,7 +654,11 @@ namespace event
     }
     return written;
 #else
-    ssize_t written = send(fd, data, size, 0);
+    int flags = 0;
+#ifdef MSG_NOSIGNAL
+    flags |= MSG_NOSIGNAL;
+#endif
+    ssize_t written = send(fd, data, size, flags);
     if (written < 0)
     {
       if (socket_pending_error(fd) == 0)
