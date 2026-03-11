@@ -391,6 +391,8 @@ void Server::read_client(int client_fd)
 
         if (state == BODY || state == COMPLETE)
         {
+            conn.req.printRequest();
+            conn.http_v = conn.req.getRequest().http_v;
             std::string host = conn.req.getHeaderVal("host");
             conn.servConf = findServer(conn.ip, conn.port, host);
             if (!conn.servConf)
@@ -842,11 +844,26 @@ void Server::reset_static_file_stream(ClientCon& conn)
 /*                                UPLOAD                                 */
 /*************************************************************************/
 
+void Server::resetUpload(ClientCon &conn)
+{
+    conn.upload_active = false;
+    /* conn.upload_file; */
+    conn.MPFlag = false;
+    /* conn.multipart; */
+    conn.multipart_state = MP_BOUNDARY;
+    conn.MPCount = 0;
+    conn.upload_path.clear();
+    conn.chunk_buf.clear();
+    conn.upload_bytes_remaining = 0;
+    conn.uploaded_bytes = 0;
+    conn.chunked = false;
+}
+
 void Server::uploadComplete(ClientCon& conn)
 {
     conn.upload_file.close();
-    conn.upload_active = false;
-    HttpResponse res(conn.keep_alive ? "keep-alive" : "close", conn.req.getRequest().http_v);
+    resetUpload(conn);
+    HttpResponse res(conn.keep_alive ? "keep-alive" : "close", conn.http_v);
     res.setStatus(Created);
     res.setHeader("Location", conn.upload_path);
     conn.response_out = res.buildResponse();

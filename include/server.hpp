@@ -45,6 +45,7 @@ struct ClientCon
     time_t last_act = 0;
 
     HttpRequest req;
+    std::string http_v;
     const ServerConfig *servConf;
 
     std::string response_out;
@@ -127,6 +128,7 @@ class Server
 
     void new_connection(int listen_fd);
     void resetConnection(ClientCon& conn);
+    void resetUpload(ClientCon &conn);
     bool processBody(ClientCon &conn, const std::string &str, ParseState *state, size_t *to_write);
     bool setMPBoundary(ClientCon &conn, std::string content_type);
     bool openUploadFile(ClientCon &conn, std::string ext);
