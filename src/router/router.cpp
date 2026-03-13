@@ -142,7 +142,6 @@ Route Router::route()
         else if (S_ISDIR(st.st_mode))
         {
             std::string index_path = mapIndexPath(result.file_path, loc);
-            std::cout << index_path << std::endl;
 
             if (!index_path.empty())
             {
