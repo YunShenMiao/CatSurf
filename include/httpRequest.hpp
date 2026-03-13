@@ -4,20 +4,14 @@
 #include <string>
 #include <map>
 #include <optional>
+#include "statusCodes.hpp"
 
 #define MAX_HEADER_SIZE 64000
 #define MAX_HEADER_LINE 8000
-#define MAX_REQUEST_LINE 8000
-#define MAX_URI 6000
-#define MAX_CONT_LEN 104857600
+#define MAX_REQUEST_LINE 8050
+#define MAX_URI 8000
+#define MAX_CONT_LEN 1046364747436
 
-enum ErrorCode
-{
-    BadRequest = 400,
-    PayloadTooLarge = 413,
-    HTTPVersionNotSupported = 505
-};
-//
 enum ParseState {REQUEST_LINE, HEADERS, BODY, COMPLETE, ERROR};
 
 struct parsedRequest
@@ -25,12 +19,17 @@ struct parsedRequest
     std::string buffer;
     std::string method;
     std::string uri;
+    std::string query;
     std::string http_v;
     std::map<std::string, std::string> headers;
     std::string body;
     size_t content_length;
+    std::string content_type;
     int error_code;
     std::string error_info;
+    bool chunked = false;
+    bool MPFlag = false;
+    std::string user_agent;
 };
 
 class HttpRequest 
@@ -39,14 +38,26 @@ class HttpRequest
     std::string buffer;
     std::string method;
     std::string uri;
+    std::string query;
     std::string http_v;
     std::map<std::string, std::string> headers;
     std::string body;
     size_t content_length;
+    std::string content_type;
     int error_code;
     std::string error_info;
     bool is_complete;
     ParseState state;
+    bool chunked;
+    bool MPFlag;
+
+    bool validateEncodedURI(const std::string& str);
+    void parseSL(std::string cont);
+    void parseHeader(std::string cont);
+    ParseState parseChunkedBody(std::string& buffer);
+    ParseState parseMultipart();
+    void parseMultipartHeaders(const std::string& head);
+    void setError(ErrorCode type, std::string info);
     
     public:
     //ocf
@@ -56,15 +67,13 @@ class HttpRequest
     ~HttpRequest();
 
     ParseState parseRequest(const char* data, size_t len);
-    void parseSL(std::string cont);
-    void parseHeader(std::string cont);
-    ParseState parseChunkedBody(std::string& buffer);
-    void setError(ErrorCode type, std::string info);
     
     // Getters
     const std::string& getMethod() const;
     const std::string& getUri() const;
     const std::string getHeaderVal(const std::string& key) const;
+    ParseState getState() const;
+    const std::string getBuffer() const;
     parsedRequest getRequest();
 
     //print
@@ -73,9 +82,14 @@ class HttpRequest
     // helper
     void clear();
     void check_host();
+    void check_cont_len();
+    void check_transfer_enc();
 };
 
-bool validateURI(std::string& str);
+std::string decodeURI(const std::string& str);
+std::string decodeQuery(const std::string& str);
+bool validateDecodedURI(const std::string& str);
+
 bool validateHttpV(std::string str);
 bool validateHeader(std::string key, std::string value);
 void skipWhitespace(const std::string& str, size_t& i);

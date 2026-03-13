@@ -1,4 +1,7 @@
 #include "../../include/configParser.hpp"
+#include "../../include/utils.hpp"
+
+#include <stdexcept>
 #include <thread>
 #include <set>
 
@@ -13,9 +16,9 @@ void ConfigParser::setDefaultGC()
 void ConfigParser::setGlobalDirective(const std::string& key, const std::string& value)
 {
     if (key == "error_log")
-        global_config.error_log = value;
+        global_config.error_log = resolveConfigPath(value);
     else if (key == "pid")
-        global_config.pid = value;
+        global_config.pid = resolveConfigPath(value);
 }
 
 void ConfigParser::parseGlobalConfig(const std::vector<std::string>& tokens, size_t& i)

@@ -1,7 +1,10 @@
-#include "../../include/configParser.hpp"
+
 #include <fstream>
 #include <sstream>
+#include <iostream>
 #include <algorithm>
+
+#include "../../include/configParser.hpp"
 
 /***********************************************************/
 /*               CONSTRUCTOR & DESTRUCTOR                  */
@@ -45,7 +48,6 @@ bool ConfigParser::validLine(std::string str)
     str.erase(std::remove_if(str.begin(), str.end(), 
               [](unsigned char c) { return std::isspace(c); }), 
               str.end());
-    std::cout << str << std::endl;
     if (str == "server" || str == "server{" || str == "{" || str == "}")
         return true;
     if (str.find("location") != std::string::npos)
@@ -106,4 +108,5 @@ void ConfigParser::parse()
     }
     if (servers.empty())
         throw std::runtime_error("No server blocks found in config file");
+
 }

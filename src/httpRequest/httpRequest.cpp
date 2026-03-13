@@ -5,53 +5,9 @@
 #include <cctype>
 #include <algorithm>
 
+HttpRequest::HttpRequest (): content_length(0), error_code(0), is_complete(false), state(REQUEST_LINE), chunked(false), MPFlag(false){}
 
-/*
-1) CLOSE CONNECTION
-depending on reason need to close connection after error (". If the unrecoverable error is in a request message, the server
-respond with a 400 (Bad Request) status code and then close the connection. )")
-
-2) PREFER TRANSFER OR RESULT IN ERROR?
-TRANSFER ENCODING OVERWRITES CONTENT_LENGTH
---> A server reject a request that contains both Content-Length and Transfer-Encoding or
-process such a request in accordance with the Transfer-Encoding alone. Regardless, the server
-close the connection after responding to such a request to avoid the potential attacks.
-
-3) ERROR CODES
-501 for any transfer coding besides chunked !!!!!!! && http1.0 no transfer coding 
-some error codes returned by parser
-Condition	Parser error_code	Server responds
-Invalid request line	400	400 Bad Request
-Invalid headers	400	400 Bad Request
-Unsupported HTTP version	505	505 HTTP Version Not Supported
-Header fields too large	431	431 Request Header Fields Too Large
-URI too long	414	414 URI Too Long
-Invalid Content-Length	400	400 Bad Request
-Body too large	413	413 Payload Too Large */
-
-
-/* 
-4) need to check again if this is about error oooor!!
-A message that uses a valid Content-Length is
-incomplete if the size of the message body received (in octets) is less than the value given by
-Content-Length. A response that has neither chunked transfer coding nor Content-Length is
-terminated by closure of the connection and, if the header section was received intact, is
-considered complete unless an error was indicated by the underlying connection   p25*/
-
-/*  
-5) whould we handle? what would be excessive?
-a server might reject traffic that it deems abusive or characteristic of a denial-of-service
-attack, such as an excessive number of open connections from a single client.
- */
-
- // 6) right handling of connection closure 
- // if close from client, also close header in response & then close connection
- //last activity on recv -> HEADER_TIMEOUT     5–10 seconds BODY_TIMEOUT 10–30 seconds  KEEPALIVE_TIMEOUT  10–60 seconds
-
-
-HttpRequest::HttpRequest (): content_length(0), error_code(0), is_complete(false), state(REQUEST_LINE) {}
-
-HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length) , is_complete(other.is_complete), state(other.state) {}
+HttpRequest::HttpRequest(const HttpRequest& other): buffer(other.buffer), method(other.method), uri(other.uri), query(other.query), http_v(other.http_v), headers(other.headers), body(other.body), content_length(other.content_length), error_code(other.error_code), error_info(other.error_info), is_complete(other.is_complete), state(other.state), chunked(other.chunked), MPFlag(other.MPFlag) {}
 
 HttpRequest& HttpRequest::operator=(const HttpRequest& other)
 {
@@ -60,12 +16,18 @@ HttpRequest& HttpRequest::operator=(const HttpRequest& other)
         buffer = other.buffer;
         method = other.method;
         uri = other.uri;
+        query = other.query;
         http_v = other.http_v;
         headers = other.headers;
         body = other.body;
         content_length = other.content_length;
+        error_code = other.error_code;
         is_complete = other.is_complete;
+        chunked = other.chunked;
         state = other.state;
+        error_info = other.error_info;
+        MPFlag = other.MPFlag;
+        chunked = other.chunked;
     }
     return *this;
 }
@@ -79,6 +41,16 @@ HttpRequest::~HttpRequest() {}
 const std::string& HttpRequest::getMethod() const 
 {
     return method;
+}
+
+ParseState HttpRequest::getState() const
+{
+    return state;
+}
+
+const std::string HttpRequest::getBuffer() const
+{
+    return buffer;
 }
 
 const std::string& HttpRequest::getUri() const
@@ -100,12 +72,22 @@ parsedRequest HttpRequest::getRequest()
     req.buffer = buffer;
     req.method = method;
     req.uri = uri;
+    req.query = query;
     req.http_v = http_v;
     req.headers = headers;
     req.body = body;
     req.content_length = content_length;
     req.error_code = error_code;
     req.error_info = error_info;
+    req.content_type = content_type;
+    req.chunked = chunked;
+    req.MPFlag = MPFlag;
+
+    auto ua_it = headers.find("user-agent");
+    if (ua_it != headers.end()) {
+        req.user_agent = ua_it->second;
+    }
+    
     return req;
 }
 
@@ -113,16 +95,9 @@ parsedRequest HttpRequest::getRequest()
 /*                          HELPER                         */
 /***********************************************************/
 
-std::string str_tolower(std::string s)
-{
-    std::transform(s.begin(), s.end(), s.begin(),
-        [](unsigned char c) { return std::tolower(c); });
-    return s;
-}
-
 void HttpRequest::printRequest()
 {
-    std::cout << "=== Parsed Request ===\n";
+    std::cout << "\n=== Parsed Request ===\n";
     std::cout << "Method: " << method << "\n";
     std::cout << "URI: " << uri << "\n";
     std::cout << "Version: " << http_v << "\n";
@@ -131,7 +106,7 @@ void HttpRequest::printRequest()
     for (auto it = headers.begin(); it != headers.end(); ++it)
         std::cout << it->first << " => " << it->second << std::endl;
 
-    std::cout << "======================\n";
+    std::cout << "======================\n\n";
 }
 
 void HttpRequest::printError()
@@ -154,19 +129,11 @@ void skipWhitespace(const std::string& str, size_t& i)
         i++;
 }
 
-// for event loop sth like this
-/* std::vector<parsedRequest> requests;
-if(state == COMPLETE)
-{
-    requests.push_back(obj.getRequest());
-    obj.clear();
-}
- */
-
 void HttpRequest::clear()
 {
     method.clear();
     uri.clear();
+    query.clear();
     http_v.clear();
     headers.clear();
     body.clear();
@@ -174,6 +141,7 @@ void HttpRequest::clear()
     error_code = 0;
     error_info.clear();
     is_complete = false;
+    chunked = false;
     state = REQUEST_LINE;
 }
 
@@ -181,15 +149,14 @@ void HttpRequest::clear()
 /*                      VALIDATION                         */
 /***********************************************************/
 
-// maybe no \\?
-bool validateURI(std::string& str)
+bool HttpRequest::validateEncodedURI(const std::string& str)
 {
     if (str.empty() || str.size() > MAX_URI)
         return false;
     if (str[0] != '/')
         return false;
 
-    std::string allowed = "-._~/?#&=:@!$\\()*+,;%";
+    std::string allowed = "-._~/&=:@!$()*+,;%?";
     for (size_t i = 0; i < str.size(); i++)
     {
         if (!isalnum(static_cast<unsigned char>(str[i])) && allowed.find(str[i]) == std::string::npos)
@@ -203,6 +170,55 @@ bool validateURI(std::string& str)
         }
     } 
     return true;
+}
+
+std::string decodeQuery(const std::string& str)
+{
+    std::string res;
+    res.reserve(str.size());
+
+    for (size_t i = 0; i < str.size(); ++i)
+    {
+        if (str[i] == '%')
+        {
+            char hex[3] = { str[i + 1], str[i + 2], '\0' };
+            unsigned char c = static_cast<unsigned char>(std::strtol(hex, NULL, 16));
+            if (c == '\0')
+                throw std::runtime_error("null byte");
+
+            res += c;
+            i += 2;
+        }
+        else if (str[i] == '+')
+            res += ' ';
+        else
+            res += str[i];
+    }
+    return res;
+}
+
+
+std::string decodeURI(const std::string& str)
+{
+    std::string res;
+    res.reserve(str.size());
+
+    for (size_t i = 0; i < str.size(); ++i)
+    {
+        if (str[i] == '%')
+        {
+            char hex[3] = {str[i + 1], str[i + 2], '\0'};
+            unsigned char c = static_cast<unsigned char>(std::strtol(hex, NULL, 16));
+            if (c < 0x20 || c == 0x7F || c == '\\')
+                throw std::runtime_error("invalid decoded char");
+
+            res += c;
+            i += 2;
+        }
+        else
+            res += str[i];
+    }
+    return res;
 }
 
 bool validateHttpV(std::string str)
@@ -234,11 +250,16 @@ void HttpRequest::check_host()
 {
     if (http_v == "HTTP/1.1" && getHeaderVal("host").empty())
         setError(BadRequest, "Missing Host header");
-    if (headers.count("host") > 1)
-        setError(BadRequest, "Multiple Host header");
     if (!getHeaderVal("host").empty())
     {
         std::string val = getHeaderVal("host");
+        auto ddot = val.find(':');
+        if (ddot != std::string::npos)
+        {
+            val.erase(ddot);
+            headers["host"] = val;
+        }
+            
         if (!isListen(val) && !isDomainname(val) && !isIPv6Host(val))
             setError(BadRequest, "Invalid host value");
     }
@@ -260,20 +281,65 @@ void HttpRequest::parseSL(std::string cont)
         setError(BadRequest, "Invalid Request line");
     method = cont.substr(start, end);
     if (!isMethod(method))
-        setError(BadRequest, "Invalid method in Request line");
+        setError(NotImplemented, "Unsupported HTTP method");
 
     start = end + 1;
     end = cont.find(' ', start);
     if (end == std::string::npos)
         setError(BadRequest, "Invalid Request line");
-    uri = cont.substr(start, end - start);
-    if (!validateURI(uri))
-        setError(BadRequest, "Invalid URI in Request line"); 
-    
+    std::string raw_uri = cont.substr(start, end - start);
+    if (raw_uri.size() > MAX_URI)
+        setError(URITooLong, "URI too long");
+    if (cont.size() > MAX_REQUEST_LINE)
+        setError(BadRequest, "invalid or too long request line");
+    std::string raw_query;
+    size_t qpos = raw_uri.find('?');
+    if (qpos != std::string::npos)
+    {
+        raw_query = raw_uri.substr(qpos + 1);
+        raw_uri = raw_uri.substr(0, qpos);
+    }
+
+    if (!validateEncodedURI(raw_uri))
+        setError(BadRequest, "Invalid URI in Request line");
+    try
+    {
+        uri = decodeURI(raw_uri);
+        if (!raw_query.empty())
+            query = decodeQuery(raw_query);
+        else
+            query.clear();
+    }
+    catch (std::exception &e)
+    {
+        setError(BadRequest, "Invalid URI in Request line");
+    }
     start = end + 1;
     http_v = cont.substr(start);
     if (!validateHttpV(http_v))
         setError(HTTPVersionNotSupported, "Invalid HTTP version in Request line");
+}
+
+void HttpRequest::check_cont_len()
+{
+    if (!getHeaderVal("content-length").empty())
+    {
+        try
+        {
+            if (!isNumber(getHeaderVal("content-length")))
+                setError(BadRequest, "Invalid Content-Length");
+            long long cl = std::stoll(getHeaderVal("content-length"));
+            if (cl < 0)
+                setError(BadRequest, "Invalid Content-Length");
+            else if (cl > MAX_CONT_LEN)
+                setError(PayloadTooLarge, "Payload too large");
+            content_length = static_cast<size_t>(cl);
+        }
+        catch (std::exception &e)
+        {
+            setError(BadRequest, "Invalid Content-Length");
+        }
+    }
 }
 
 void HttpRequest::parseHeader(std::string cont)
@@ -287,94 +353,55 @@ void HttpRequest::parseHeader(std::string cont)
         std::string key = str_tolower(cont.substr(i, key_end - i));
         i = key_end + 1;
         skipWhitespace(cont, i);
+        if ((key == "host" && !getHeaderVal("host").empty()) || (key == "content-length" && !getHeaderVal("content-length").empty()))
+            setError(BadRequest, "Multiple Host || Content-length header");
         
         size_t value_end = cont.find("\r\n", i);
         std::string value;
         if (value_end == std::string::npos)
-            value = "";
+            value = cont.substr(i);
         else
             value = cont.substr(i, value_end - i);
+        if ((key.size() + value.size()) > MAX_HEADER_LINE)
+            setError(BadRequest, "Header line too long");
+
         headers.insert({key, value});
 
         if (!validateHeader(key, value))
             setError(BadRequest, "Invalid header");
         if (value_end == std::string::npos || i == cont.size())
             break;
-        if (value.size() > MAX_HEADER_LINE)
-            setError(BadRequest, "Header line too long");
 
         i = value_end + 2;
     }
+    if (!getHeaderVal("content-length").empty() && !getHeaderVal("transfer-encoding").empty())
+        setError(BadRequest, "both header fields 'content-length' & 'transfer-encoding' present");
+    if (!getHeaderVal("content-type").empty())
+        content_type = getHeaderVal("content-type");
+    check_transfer_enc();
     check_host();
-    if (!getHeaderVal("content-length").empty())
-    {
-        try
-        {
-            long long cl = std::stoll(getHeaderVal("content-length"));
-            if (cl < 0 || cl > MAX_CONT_LEN)
-                setError(PayloadTooLarge, "Invalid Content-Length");
-            content_length = static_cast<size_t>(cl);
-        }
-        catch (std::exception &e)
-        {
-            setError(BadRequest, "Invalid Content-Length");
-        }
-    }
+    check_cont_len();
 }
 
-//size chunk in hex, content chunk, ...
-// no trailer header support
-// DO I NEED TO ADD MAX CHUNK SIZE && PARSE CHUNK SIZE? (rfc page 21), how is stoul handling 
-// bad request if chunk size line includes ; (anything thats not valid hex)
-ParseState HttpRequest::parseChunkedBody(std::string& buffer)
+void HttpRequest::check_transfer_enc()
 {
-    while (true)
+    if (!getHeaderVal("transfer-encoding").empty())
     {
-        size_t crlf = buffer.find("\r\n");
-        if (crlf == std::string::npos)
-            return BODY;
-
-        std::string size_str = buffer.substr(0, crlf);
-        size_t chunk_size;
-        try
-        {
-            chunk_size = std::stoul(size_str, nullptr, 16);
-        }
-        catch (std::exception &e)
-        {
-            setError(BadRequest, "Invalid chunk size");
-        }
-        if (chunk_size == 0)
-        {
-        if (buffer.size() < crlf + 4)
-            return BODY;
-        buffer.erase(0, crlf + 4);
-        return COMPLETE;
-        }
-        if (buffer.size() < crlf + 2 + chunk_size + 2)
-            return BODY;
-        if (buffer[crlf + 2 + chunk_size] != '\r' || buffer[crlf + 2 + chunk_size + 1] != '\n')
-            setError(BadRequest, "malformed chunk");
-
-        body.append(buffer, crlf + 2, chunk_size);
-        buffer.erase(0, crlf + 2 + chunk_size + 2);
+        if (http_v == "HTTP/1.0")
+            setError(NotImplemented, "Transfer-Encoding not supported in HTTP/1.0");
+        if ((str_tolower(getHeaderVal("transfer-encoding")).find("chunked") == std::string::npos))
+            setError(BadRequest, "Unsupported Transfer-Encoding");
+        else chunked = true;
     }
 }
 
-// need to add checks for payload too large, uri too long, request header fields too large
 ParseState HttpRequest::parseRequest(const char* data, size_t len)
 {
     buffer.append(data, len);
-
     while (state != COMPLETE && state != ERROR)
     {
         if (state == REQUEST_LINE) 
         {
-            if (buffer.size() > MAX_REQUEST_LINE)
-            {
-                setError(BadRequest, "invalid or too long request line");
-                return state;
-            }
             size_t pos = buffer.find("\r\n");
             if (pos == std::string::npos)
                 return state;
@@ -396,36 +423,48 @@ ParseState HttpRequest::parseRequest(const char* data, size_t len)
                 setError(BadRequest, "invalid header");
                 return state;
             }
-            size_t pos = buffer.find("\r\n\r\n");
+            size_t pos = std::string::npos;
+            size_t consumed = 0;
+
+            if (buffer.size() >= 2 && buffer.compare(0, 2, "\r\n") == 0)
+            {
+                pos = 0;
+                consumed = 2;
+            }
+            else
+            {
+                pos = buffer.find("\r\n\r\n");
+                consumed = 4;
+            }
             if (pos == std::string::npos)
                 return state;
             try
             {
                 parseHeader(buffer.substr(0, pos));
-                buffer.erase(0, pos + 4);
-                // maybe just chunked check and then inside chunked need to see if error or notwith cont len, what had precedence?
-                if (content_length == 0 && getHeaderVal("transfer-encoding").find("chunked") == std::string::npos)
+                buffer.erase(0, pos + consumed);
+                if (content_length == 0 && !chunked)
                     state = COMPLETE;
                 else
-                    state = BODY;
+                        state = BODY;
             }
             catch (std::exception &e)
             {
                 return state;
             } 
         }
-        else if (state == BODY) 
+        else if (state == BODY)
         {
-            if (auto it = headers.find("transfer-encoding"); it != headers.end() && str_tolower(it->second) == "chunked")
-                state = parseChunkedBody(buffer);
-            else if (buffer.size() >= content_length) 
+            if (!content_type.empty() && content_type.find("multipart/form-data") != std::string::npos)
+                MPFlag = true;
+            if (chunked)
+                body = buffer;
+            else
             {
                 body = buffer.substr(0, content_length);
                 buffer.erase(0, content_length);
-                state = COMPLETE;
             }
             return state;
-        }
+            }
     }
-    return COMPLETE;
+    return state;
 }
