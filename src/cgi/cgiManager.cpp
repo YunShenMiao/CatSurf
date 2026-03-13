@@ -733,9 +733,23 @@ void CgiManager::cleanupProcess(CgiProcess& proc, CgiTermination reason, int sta
         }
         client->cgi_active = false;
         client->cgi_force_close = false;
-        if (!client_gone && client->keep_alive && !client->res_ready && client->response_out.empty())
+
+        if (client_gone)
+            return;
+
+        if (client->res_ready || !client->response_out.empty())
+        {
+            poller.update(client->fd, false, true);
+        }
+        else if (client->keep_alive)
         {
             poller.update(client->fd, true, false);
+        }
+        else
+        {
+            // closes the connection for EOF-terminated CGI responses.
+            client->res_ready = true;
+            poller.update(client->fd, false, true);
         }
     }
 }

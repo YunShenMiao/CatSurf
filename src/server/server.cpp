@@ -139,6 +139,7 @@ void Server::run()
             else if (event.writable)
                 client_write(event.fd);
         } 
+        close_drained_clients();
         check_timeouts(); 
     }
 }
@@ -686,6 +687,30 @@ bool Server::finalize_response_write(ClientCon& conn)
     return true;
 }
 
+void Server::close_drained_clients()
+{
+    std::vector<int> to_close;
+
+    for (std::unordered_map<int, ClientCon>::iterator it = clients.begin(); it != clients.end(); ++it)
+    {
+        ClientCon& conn = it->second;
+        if (conn.cgi_active)
+            continue;
+        if (!conn.close_after_send)
+            continue;
+        if (conn.res_ready)
+            continue;
+        if (!conn.response_out.empty())
+            continue;
+        if (conn.file_stream_active)
+            continue;
+        to_close.push_back(it->first);
+    }
+
+    for (std::vector<int>::iterator it = to_close.begin(); it != to_close.end(); ++it)
+        close_client(*it);
+}
+
 /*************************************************************************/
 /*                        STATIC FILESTREAMING                           */
 /*************************************************************************/
@@ -857,12 +882,12 @@ void Server::resetUpload(ClientCon &conn)
 void Server::uploadComplete(ClientCon& conn)
 {
     conn.upload_file.close();
-    resetUpload(conn);
     HttpResponse res(conn.keep_alive ? "keep-alive" : "close", conn.http_v);
     res.setStatus(Created);
     res.setHeader("Location", conn.upload_path);
     conn.response_out = res.buildResponse();
     conn.res_ready = true;
+    resetUpload(conn);
     poller->update(conn.fd, false, true);
 }
 

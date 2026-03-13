@@ -150,6 +150,7 @@ class Server
     bool write_static_file_chunk(ClientCon& conn);
     void reset_static_file_stream(ClientCon& conn);
     bool finalize_response_write(ClientCon& conn);
+    void close_drained_clients();
 
     int create_and_listen(const ListenPort& lp);
     void bind_and_listen(int fd, uint16_t port, uint32_t ip);
