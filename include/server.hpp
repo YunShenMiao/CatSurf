@@ -158,6 +158,7 @@ class Server
     void reap_children();
     void drain_client_backpressure(ClientCon& conn);
     void capture_peername(int client_fd, ClientCon& conn);
+    bool handleBlockedBotRequest(ClientCon& conn, const parsedRequest& req, const std::string& fingerprint);
 
     void send_response(int client_fd, bool keep_alive);
     void send_error_response(int client_fd, int status_code, std::string error_info);
