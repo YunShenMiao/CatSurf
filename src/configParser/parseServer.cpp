@@ -108,7 +108,7 @@ void ConfigParser::parseServer(const std::vector<std::string>& tokens, size_t& i
     {
         const std::string& key = tokens[i]; 
 
-        if (duplicateCheck.count(key) > 0 && key != "location" && key != "listen" && key != "error_page")
+        if (duplicateCheck.count(key) > 0 && key != "location" && key != "error_page")
             throw std::runtime_error("Duplicate directive: " + key);
         duplicateCheck.insert(key); 
 

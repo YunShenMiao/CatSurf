@@ -546,22 +546,57 @@ bool Server::handleBlockedBotRequest(ClientCon& conn, const parsedRequest& req, 
 
 void Server::fallback_error(ClientCon& conn, int status)
 {
-    std::string body = generateErrorPage(status, mapStatus(status));
+    std::string body;
+    if (!conn.servConf)
+    {
+        body = generateErrorPage(status, mapStatus(status));
 
-    conn.response_out =
-        "HTTP/1.1 " + std::to_string(status) + " " + mapStatus(status) + "\r\n"
-        "Date: " + httpDate() + "\r\n"
-        "Server: CatSurf\r\n"
-        "Content-Type: text/html\r\n"
-        "Content-Length: " + std::to_string(body.size()) + "\r\n"
-        "Connection: close\r\n"
-        "\r\n" + body;
+        conn.response_out =
+            "HTTP/1.1 " + std::to_string(status) + " " + mapStatus(status) + "\r\n"
+            "Date: " + httpDate() + "\r\n"
+            "Server: CatSurf\r\n"
+            "Content-Type: text/html\r\n"
+            "Content-Length: " + std::to_string(body.size()) + "\r\n"
+            "Connection: close\r\n"
+            "\r\n" + body;
+        conn.keep_alive = false;
+    }
+    else
+    {
+        std::string ka = "close";
+        if (conn.keep_alive)
+            ka = "keep-alive";
+        HttpResponse res(ka, conn.http_v);
+        std::map<int, std::string>::const_iterator it = conn.servConf->error_page.find(status);
 
-    conn.keep_alive = false;
+        if (it != conn.servConf->error_page.end())
+        {
+            std::string errorPagePath = conn.servConf->root;
+            if (errorPagePath.back() != '/')
+                errorPagePath += '/';
+            errorPagePath += it->second;
+
+            if (isWithinFSRoot(errorPagePath, conn.servConf->root))
+            {
+                if (!readFile(errorPagePath, body))
+                    body = generateErrorPage(status, mapStatus(status));
+            }
+            else
+                body = generateErrorPage(status, mapStatus(status));
+        }
+        else
+            body = generateErrorPage(status, mapStatus(status));
+
+        res.setHeader("Content-Type", "text/html");
+        res.setHeader("Content-Length", std::to_string(body.size()));
+        res.setStatus(status);
+        res.setBody(body);
+
+        conn.response_out = res.buildResponse();
+    }
     conn.res_ready = true;
     poller->update(conn.fd, false, true);
 }
-
 
 const ServerConfig* Server::findServer(uint32_t ip, uint16_t port, const std::string& host_header)
 {
